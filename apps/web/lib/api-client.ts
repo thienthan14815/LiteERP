@@ -7,6 +7,12 @@ import axios, {
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api/v1";
 
+// SECURITY TRADE-OFF (Phase 1 MVP):
+// We store both access + refresh tokens in localStorage for simplicity. This is
+// vulnerable to XSS. Production should:
+//   - keep refresh token in an httpOnly, Secure, SameSite=Strict cookie
+//   - keep access token only in memory
+// Tracked for Phase 2 hardening.
 const ACCESS_TOKEN_KEY = "refurb.access_token";
 const REFRESH_TOKEN_KEY = "refurb.refresh_token";
 
