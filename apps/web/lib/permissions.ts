@@ -107,12 +107,14 @@ export function hasAnyPermission(
   return required.some((perm) => userPermissions.includes(perm));
 }
 
-export function hasRole(userRoles: string[] | undefined, role: Role): boolean {
+type RoleLike = string | { code: string; name?: string };
+
+export function hasRole(userRoles: RoleLike[] | undefined, role: Role): boolean {
   if (!userRoles) return false;
-  return userRoles.includes(role);
+  return userRoles.some((r) => (typeof r === "string" ? r === role : r.code === role));
 }
 
-export function isAdmin(userRoles: string[] | undefined): boolean {
+export function isAdmin(userRoles: RoleLike[] | undefined): boolean {
   return hasRole(userRoles, ROLE.ADMIN);
 }
 

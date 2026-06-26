@@ -241,7 +241,7 @@ function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
                   {user?.fullName ?? user?.email?.split("@")[0] ?? "User"}
                 </span>
                 <span className="text-xs text-slate-500">
-                  {user?.roles?.[0] ?? "—"}
+                  {user?.roles?.[0]?.name ?? user?.roles?.[0]?.code ?? "—"}
                 </span>
               </div>
               <ChevronDown className="hidden h-4 w-4 text-slate-400 sm:block" />
@@ -254,7 +254,7 @@ function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
                 <span className="text-xs text-slate-500">{user?.email}</span>
                 {user?.roles?.length ? (
                   <span className="mt-1 text-xs text-slate-500">
-                    {user.roles.join(", ")}
+                    {user.roles.map((r) => r.name ?? r.code).join(", ")}
                   </span>
                 ) : null}
               </div>

@@ -4,11 +4,17 @@ import * as React from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { apiClient, setTokens, clearTokens } from "@/lib/api-client";
 
+export interface AuthRole {
+  id: string;
+  code: string;
+  name: string;
+}
+
 export interface AuthUser {
   id: string;
   email: string;
   fullName: string;
-  roles: string[];
+  roles: AuthRole[];
   permissions: string[];
 }
 
@@ -17,7 +23,7 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   isLoading: boolean;
   permissions: string[];
-  roles: string[];
+  roles: AuthRole[];
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
 }
