@@ -18,7 +18,7 @@ import { QueryWarrantyDto } from "./dto/query-warranty.dto";
 import { TransitionWarrantyDto, WARRANTY_TRANSITIONS } from "./dto/transition-warranty.dto";
 import { ReplaceComponentDto } from "./dto/replace-component.dto";
 
-// Persisted in WarrantyCase.notes as a JSON blob so we can reverse status on
+// Persisted in WarrantyCase.resolution as a JSON blob so we can reverse status on
 // COMPLETED / REJECTED without a schema migration. Shape:
 //   { originalStatus: { finishedPc?: FinishedPcStatus, component?: ComponentStatus },
 //     componentId?: string, salesOrderId?: string, freeform?: string }
@@ -158,6 +158,42 @@ export class WarrantiesService {
           `Customer ${dto.customerId} not found`,
           HttpStatus.NOT_FOUND,
         );
+      }
+
+      const ACTIVE_STATUSES = [
+        WarrantyStatus.RECEIVED,
+        WarrantyStatus.INSPECTING,
+        WarrantyStatus.REPAIRING,
+        WarrantyStatus.REPLACED,
+      ];
+
+      if (dto.finishedPcId) {
+        const existing = await tx.warrantyCase.findFirst({
+          where: { finishedPcId: dto.finishedPcId, status: { in: ACTIVE_STATUSES } },
+        });
+        if (existing) {
+          throw new BusinessError(
+            "WARRANTY_ALREADY_OPEN",
+            `Đã có phiếu bảo hành đang xử lý (${existing.code}) cho máy này`,
+            HttpStatus.CONFLICT,
+          );
+        }
+      }
+
+      if (dto.componentId) {
+        const existing = await tx.warrantyCase.findFirst({
+          where: {
+            status: { in: ACTIVE_STATUSES },
+            items: { some: { removedComponentId: dto.componentId } },
+          },
+        });
+        if (existing) {
+          throw new BusinessError(
+            "WARRANTY_ALREADY_OPEN",
+            `Đã có phiếu bảo hành đang xử lý (${existing.code}) cho linh kiện này`,
+            HttpStatus.CONFLICT,
+          );
+        }
       }
 
       const meta: WarrantyMeta = { originalStatus: {} };
@@ -408,11 +444,11 @@ export class WarrantiesService {
       }
       const removed = await tx.component.findUnique({
         where: { id: dto.removedComponentId },
-        select: { id: true, code: true, status: true, categoryId: true },
+        select: { id: true, code: true, status: true, categoryId: true, currentFinishedPcId: true },
       });
       const replacement = await tx.component.findUnique({
         where: { id: dto.replacementComponentId },
-        select: { id: true, code: true, status: true, categoryId: true, costPrice: true },
+        select: { id: true, code: true, status: true, categoryId: true, costPrice: true, currentFinishedPcId: true },
       });
       if (!removed || !replacement) {
         throw new BusinessError(
@@ -435,6 +471,22 @@ export class WarrantiesService {
           HttpStatus.CONFLICT,
         );
       }
+
+      const before = {
+        link: { id: link.id, installedAt: link.installedAt, removedAt: link.removedAt },
+        removedComponent: {
+          id: removed.id,
+          code: removed.code,
+          status: removed.status,
+          currentFinishedPcId: removed.currentFinishedPcId,
+        },
+        replacementComponent: {
+          id: replacement.id,
+          code: replacement.code,
+          status: replacement.status,
+          currentFinishedPcId: replacement.currentFinishedPcId,
+        },
+      };
 
       // Mark removed component as DEFECTIVE (broken from the customer PC).
       await this.stock.create(
@@ -497,6 +549,7 @@ export class WarrantiesService {
           action: "warranty.replace_component",
           entityType: "WarrantyCase",
           entityId: wc.id,
+          before,
           after: {
             warrantyItemId: item.id,
             removedComponentId: removed.id,

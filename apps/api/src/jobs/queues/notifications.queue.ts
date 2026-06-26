@@ -12,7 +12,6 @@ export interface WarrantyNotificationPayload {
 
 @Injectable()
 export class NotificationsQueueService implements OnModuleDestroy {
-  private readonly logger = new Logger(NotificationsQueueService.name);
   private readonly queue: Queue;
 
   constructor() {

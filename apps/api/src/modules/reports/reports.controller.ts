@@ -3,7 +3,6 @@ import { Type } from "class-transformer";
 import { IsInt, IsISO8601, IsOptional, IsString, Max, Min } from "class-validator";
 import {
   ComponentStatus,
-  FinishedPcStatus,
   MachineStatus,
   SalesOrderStatus,
   WarrantyStatus,
@@ -209,7 +208,4 @@ export class ReportsController {
   async jobStatus(@Param("id") id: string) {
     return this.reportsQueue.status(id);
   }
-
-  // Keep FinishedPcStatus referenced for future expansion (silences unused warnings).
-  static __keepEnums = FinishedPcStatus;
 }

@@ -59,17 +59,29 @@ export class AttachmentsService {
       );
     }
     const key = this.buildKey(dto.relatedType, dto.relatedId, dto.fileName);
-    const attachment = await this.prisma.attachment.create({
-      data: {
-        fileName: dto.fileName,
-        fileUrl: key,
-        fileType: dto.fileType ?? inferFileType(dto.mimeType),
-        mimeType: dto.mimeType,
-        size: 0,
-        relatedType: dto.relatedType,
-        relatedId: dto.relatedId,
-        createdById: this.ctx.getUserId() ?? null,
-      },
+    const attachment = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.attachment.create({
+        data: {
+          fileName: dto.fileName,
+          fileUrl: key,
+          fileType: dto.fileType ?? inferFileType(dto.mimeType),
+          mimeType: dto.mimeType,
+          size: 0,
+          relatedType: dto.relatedType,
+          relatedId: dto.relatedId,
+          createdById: this.ctx.getUserId() ?? null,
+        },
+      });
+      await this.audit.record(
+        {
+          action: "attachment.upload_url",
+          entityType: "Attachment",
+          entityId: row.id,
+          after: { key, relatedType: dto.relatedType, relatedId: dto.relatedId },
+        },
+        tx,
+      );
+      return row;
     });
     const put = new PutObjectCommand({
       Bucket: this.bucket,
@@ -77,12 +89,6 @@ export class AttachmentsService {
       ContentType: dto.mimeType,
     });
     const url = await getSignedUrl(this.client, put, { expiresIn: UPLOAD_URL_TTL });
-    await this.audit.record({
-      action: "attachment.upload_url",
-      entityType: "Attachment",
-      entityId: attachment.id,
-      after: { key, relatedType: dto.relatedType, relatedId: dto.relatedId },
-    });
     return { attachmentId: attachment.id, uploadUrl: url, key, expiresIn: UPLOAD_URL_TTL };
   }
 
@@ -91,18 +97,23 @@ export class AttachmentsService {
     if (!a) {
       throw new NotFoundException({ code: "ATTACHMENT_NOT_FOUND", message: "Attachment not found" });
     }
-    const updated = await this.prisma.attachment.update({
-      where: { id },
-      data: { size: dto.size },
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.attachment.update({
+        where: { id },
+        data: { size: dto.size },
+      });
+      await this.audit.record(
+        {
+          action: "attachment.confirm",
+          entityType: "Attachment",
+          entityId: id,
+          before: a,
+          after: updated,
+        },
+        tx,
+      );
+      return updated;
     });
-    await this.audit.record({
-      action: "attachment.confirm",
-      entityType: "Attachment",
-      entityId: id,
-      before: a,
-      after: updated,
-    });
-    return updated;
   }
 
   async list(relatedType: string, relatedId: string) {
@@ -127,19 +138,25 @@ export class AttachmentsService {
     if (!a) {
       throw new NotFoundException({ code: "ATTACHMENT_NOT_FOUND", message: "Attachment not found" });
     }
-    // Best-effort remove from MinIO; row stays (no deletedAt column in schema yet).
+    await this.prisma.$transaction(async (tx) => {
+      await tx.attachment.delete({ where: { id } });
+      await this.audit.record(
+        {
+          action: "attachment.delete",
+          entityType: "Attachment",
+          entityId: id,
+          before: a,
+        },
+        tx,
+      );
+    });
+    // Best-effort remove from MinIO AFTER the row is gone; if S3 fails the DB
+    // change still commits (row deletion is the source of truth).
     try {
       await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: a.fileUrl }));
     } catch (err) {
       this.logger.warn(`Failed to remove S3 object ${a.fileUrl}: ${(err as Error).message}`);
     }
-    await this.prisma.attachment.delete({ where: { id } });
-    await this.audit.record({
-      action: "attachment.delete",
-      entityType: "Attachment",
-      entityId: id,
-      before: a,
-    });
     return { id, deleted: true };
   }
 }

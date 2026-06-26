@@ -82,7 +82,7 @@ export default function WarrantiesPage() {
           />
           <Select
             value={status}
-            onValueChange={(v) => { setStatus(v as any); setPage(1); }}
+            onValueChange={(v) => { setStatus(v as WarrantyStatus | "ALL"); setPage(1); }}
           >
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>

@@ -11,7 +11,6 @@ export interface GenerateReportPayload {
 
 @Injectable()
 export class ReportsQueueService implements OnModuleDestroy {
-  private readonly logger = new Logger(ReportsQueueService.name);
   private readonly queue: Queue;
   private readonly events: QueueEvents;
 
