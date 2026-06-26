@@ -1,0 +1,766 @@
+// Computer Refurbishment & Inventory Management System — Database Schema
+// Phase 0 foundation. Future phases extend with relations & business logic
+// but should not redefine tables.
+//
+// Conventions:
+// - PascalCase models, snake_case columns via @map.
+// - All business tables carry tenant_id + branch_id (nullable now, ready for
+//   multi-tenant / multi-branch per ARCHITECTURE.md sections 28 & 29).
+// - Every table carries created_at, updated_at, created_by_id (FK to users,
+//   nullable so seed / system actions don't break).
+// - Status fields are enums and indexed (ARCHITECTURE.md section 27).
+// - Tables that are append-only (stock_transactions, audit_logs) intentionally
+//   omit updated_at.
+// - `warehouses` model is deferred to a future multi-branch phase per
+//   ARCHITECTURE.md section 28. `stock_transactions` carries `branch_id` for
+//   single-warehouse-per-branch semantics until then.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum MachineStatus {
+  NEW
+  CHECKED
+  DISASSEMBLED
+  READY_FOR_SALE
+  SOLD
+  SCRAP
+}
+
+enum ComponentStatus {
+  IN_STOCK
+  RESERVED
+  ASSEMBLED
+  SOLD
+  DEFECTIVE
+  WARRANTY
+  RETURNED
+  SCRAPPED
+  LOST
+}
+
+enum FinishedPcStatus {
+  DRAFT
+  ASSEMBLING
+  TESTING
+  READY_FOR_SALE
+  SOLD
+  WARRANTY
+  RETURNED
+  DEFECTIVE
+  SCRAPPED
+}
+
+enum StockTxnType {
+  IN
+  OUT
+  TRANSFER
+  ADJUSTMENT
+  RETURN
+  SCRAP
+}
+
+enum WarrantyStatus {
+  RECEIVED
+  INSPECTING
+  REPAIRING
+  REPLACED
+  COMPLETED
+  REJECTED
+}
+
+enum PurchaseOrderStatus {
+  DRAFT
+  CONFIRMED
+  CANCELLED
+}
+
+enum AssemblyStatus {
+  DRAFT
+  IN_PROGRESS
+  TESTING
+  COMPLETED
+  CANCELLED
+}
+
+enum SalesOrderStatus {
+  DRAFT
+  CONFIRMED
+  CANCELLED
+  REFUNDED
+}
+
+enum SalesItemType {
+  FINISHED_PC
+  COMPONENT
+}
+
+enum PurchaseItemType {
+  MACHINE
+  COMPONENT
+}
+
+enum ComponentCondition {
+  GOOD
+  NEEDS_REPAIR
+  DEFECTIVE
+  LIQUIDATION
+}
+
+// ============================================================================
+// AUTH & RBAC
+// ============================================================================
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  fullName     String    @map("full_name")
+  phone        String?
+  isActive     Boolean   @default(true) @map("is_active")
+  lastLoginAt  DateTime? @map("last_login_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  userRoles UserRole[]
+
+  // Reverse relations for created_by (kept minimal — most are not actively used
+  // from the User side, but Prisma requires the named relation on both ends).
+  suppliersCreated      Supplier[]         @relation("SupplierCreatedBy")
+  customersCreated      Customer[]         @relation("CustomerCreatedBy")
+  purchaseOrdersCreated PurchaseOrder[]    @relation("PurchaseOrderCreatedBy")
+  machinesCreated       Machine[]          @relation("MachineCreatedBy")
+  componentsCreated     Component[]        @relation("ComponentCreatedBy")
+  assemblyOrdersCreated AssemblyOrder[]    @relation("AssemblyOrderCreatedBy")
+  finishedPcsCreated    FinishedPc[]       @relation("FinishedPcCreatedBy")
+  salesOrdersCreated    SalesOrder[]       @relation("SalesOrderCreatedBy")
+  warrantyCasesCreated  WarrantyCase[]     @relation("WarrantyCaseCreatedBy")
+  stockTxnsCreated      StockTransaction[] @relation("StockTxnCreatedBy")
+  expensesCreated       Expense[]          @relation("ExpenseCreatedBy")
+  attachmentsCreated    Attachment[]       @relation("AttachmentCreatedBy")
+  auditLogs             AuditLog[]         @relation("AuditLogActor")
+
+  @@map("users")
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  code        String   @unique // ADMIN, MANAGER, WAREHOUSE, ...
+  name        String
+  description String?
+  isSystem    Boolean  @default(false) @map("is_system")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  userRoles       UserRole[]
+  rolePermissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(cuid())
+  code        String   @unique // purchase:create, component:update, ...
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model UserRole {
+  userId    String   @map("user_id")
+  roleId    String   @map("role_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+model RolePermission {
+  roleId       String   @map("role_id")
+  permissionId String   @map("permission_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// ============================================================================
+// PARTIES
+// ============================================================================
+
+model Supplier {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  phone       String?
+  email       String?
+  address     String?
+  taxCode     String?  @map("tax_code")
+  notes       String?
+  tenantId    String?  @map("tenant_id")
+  branchId    String?  @map("branch_id")
+  createdById String?  @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  createdBy      User?           @relation("SupplierCreatedBy", fields: [createdById], references: [id])
+  purchaseOrders PurchaseOrder[]
+
+  @@index([name])
+  @@index([tenantId])
+  @@index([branchId])
+  @@map("suppliers")
+}
+
+model Customer {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  phone       String?
+  email       String?
+  address     String?
+  taxCode     String?  @map("tax_code")
+  notes       String?
+  tenantId    String?  @map("tenant_id")
+  branchId    String?  @map("branch_id")
+  createdById String?  @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  createdBy     User?          @relation("CustomerCreatedBy", fields: [createdById], references: [id])
+  salesOrders   SalesOrder[]
+  warrantyCases WarrantyCase[]
+
+  @@index([name])
+  @@index([phone])
+  @@index([tenantId])
+  @@index([branchId])
+  @@map("customers")
+}
+
+// ============================================================================
+// PURCHASING
+// ============================================================================
+
+model PurchaseOrder {
+  id          String              @id @default(cuid())
+  code        String              @unique
+  supplierId  String?             @map("supplier_id")
+  status      PurchaseOrderStatus @default(DRAFT)
+  totalAmount Decimal             @default(0) @map("total_amount") @db.Decimal(18, 2)
+  otherCost   Decimal             @default(0) @map("other_cost") @db.Decimal(18, 2)
+  notes       String?
+  confirmedAt DateTime?           @map("confirmed_at")
+  cancelledAt DateTime?           @map("cancelled_at")
+  tenantId    String?             @map("tenant_id")
+  branchId    String?             @map("branch_id")
+  createdById String?             @map("created_by_id")
+  createdAt   DateTime            @default(now()) @map("created_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
+
+  supplier  Supplier?      @relation(fields: [supplierId], references: [id])
+  createdBy User?          @relation("PurchaseOrderCreatedBy", fields: [createdById], references: [id])
+  items     PurchaseItem[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@index([supplierId])
+  @@index([tenantId])
+  @@index([branchId])
+  @@map("purchase_orders")
+}
+
+model PurchaseItem {
+  id              String           @id @default(cuid())
+  purchaseOrderId String           @map("purchase_order_id")
+  itemType        PurchaseItemType @map("item_type")
+  description     String
+  quantity        Int              @default(1)
+  unitPrice       Decimal          @map("unit_price") @db.Decimal(18, 2)
+  totalPrice      Decimal          @map("total_price") @db.Decimal(18, 2)
+  notes           String?
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  machines      Machine[]
+
+  @@index([purchaseOrderId])
+  @@index([itemType])
+  @@map("purchase_items")
+}
+
+// ============================================================================
+// MACHINES (purchased / incoming)
+// ============================================================================
+
+model Machine {
+  id             String        @id @default(cuid())
+  code           String        @unique // PC000001
+  serial         String?
+  status         MachineStatus @default(NEW)
+  purchaseItemId String?       @map("purchase_item_id")
+  cost           Decimal       @default(0) @db.Decimal(18, 2)
+  repairCost     Decimal       @default(0) @map("repair_cost") @db.Decimal(18, 2)
+  cleaningCost   Decimal       @default(0) @map("cleaning_cost") @db.Decimal(18, 2)
+  notes          String?
+  inspectedAt    DateTime?     @map("inspected_at")
+  disassembledAt DateTime?     @map("disassembled_at")
+  soldAt         DateTime?     @map("sold_at")
+  tenantId       String?       @map("tenant_id")
+  branchId       String?       @map("branch_id")
+  createdById    String?       @map("created_by_id")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  purchaseItem      PurchaseItem?      @relation(fields: [purchaseItemId], references: [id])
+  createdBy         User?              @relation("MachineCreatedBy", fields: [createdById], references: [id])
+  machineComponents MachineComponent[]
+  // Components that physically originated from this machine (after disassembly).
+  sourcedComponents Component[]        @relation("ComponentSourceMachine")
+
+  @@index([status])
+  @@index([serial])
+  @@index([createdAt])
+  @@index([tenantId])
+  @@index([branchId])
+  @@map("machines")
+}
+
+// Snapshot of components declared during the inspection step — captured for
+// audit / cost allocation. Distinct from canonical Component records which are
+// created when the machine is disassembled.
+model MachineComponent {
+  id            String             @id @default(cuid())
+  machineId     String             @map("machine_id")
+  categoryId    String             @map("category_id")
+  model         String?
+  serial        String?
+  condition     ComponentCondition @default(GOOD)
+  allocatedCost Decimal            @default(0) @map("allocated_cost") @db.Decimal(18, 2)
+  notes         String?
+  componentId   String?            @unique @map("component_id") // populated once the canonical Component is created
+  createdAt     DateTime           @default(now()) @map("created_at")
+  updatedAt     DateTime           @updatedAt @map("updated_at")
+
+  machine   Machine           @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  category  ComponentCategory @relation(fields: [categoryId], references: [id])
+  component Component?        @relation("MachineComponentCanonical", fields: [componentId], references: [id])
+
+  @@index([machineId])
+  @@index([categoryId])
+  @@map("machine_components")
+}
+
+// ============================================================================
+// COMPONENTS (canonical, individual physical items)
+// ============================================================================
+
+model ComponentCategory {
+  id        String   @id @default(cuid())
+  code      String   @unique // CPU, MB, RAM, SSD, HDD, GPU, PSU, CASE, FAN, WIFI, BT, OTHER
+  name      String
+  prefix    String   @unique // CPU, MB, RAM, ... — used for component code generation
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  components        Component[]
+  machineComponents MachineComponent[]
+
+  @@map("component_categories")
+}
+
+model Component {
+  id                  String             @id @default(cuid())
+  code                String             @unique // CPU000001, RAM000001, ...
+  serialNumber        String?            @map("serial_number")
+  categoryId          String             @map("category_id")
+  model               String?
+  status              ComponentStatus    @default(IN_STOCK)
+  condition           ComponentCondition @default(GOOD)
+  costPrice           Decimal            @default(0) @map("cost_price") @db.Decimal(18, 2)
+  location            String?
+  notes               String?
+  // Both source_machine_id (where it came from) and current_finished_pc_id
+  // (where it currently lives) are tracked because a component can move through
+  // multiple finished PCs over its lifetime — needed for full traceability per
+  // quanlybanhang.md section 15.
+  sourceMachineId     String?            @map("source_machine_id")
+  currentFinishedPcId String?            @map("current_finished_pc_id")
+  tenantId            String?            @map("tenant_id")
+  branchId            String?            @map("branch_id")
+  createdById         String?            @map("created_by_id")
+  createdAt           DateTime           @default(now()) @map("created_at")
+  updatedAt           DateTime           @updatedAt @map("updated_at")
+
+  category             ComponentCategory     @relation(fields: [categoryId], references: [id])
+  sourceMachine        Machine?              @relation("ComponentSourceMachine", fields: [sourceMachineId], references: [id])
+  currentFinishedPc    FinishedPc?           @relation("ComponentCurrentFinishedPc", fields: [currentFinishedPcId], references: [id])
+  createdBy            User?                 @relation("ComponentCreatedBy", fields: [createdById], references: [id])
+  machineComponent     MachineComponent?     @relation("MachineComponentCanonical")
+  assemblyItems        AssemblyItem[]
+  finishedPcLinks      FinishedPcComponent[]
+  salesItems           SalesItem[]
+  stockTransactions    StockTransaction[]
+  warrantyItemsAdded   WarrantyItem[]        @relation("WarrantyItemReplacement")
+  warrantyItemsRemoved WarrantyItem[]        @relation("WarrantyItemRemoved")
+
+  // Serial numbers are tenant-scoped unique. Postgres treats multiple NULLs as
+  // distinct in a unique index, so this works as a partial-unique substitute
+  // (components without a printed serial allowed).
+  @@unique([tenantId, serialNumber])
+  @@index([code])
+  @@index([status])
+  @@index([categoryId])
+  @@index([sourceMachineId])
+  @@index([currentFinishedPcId])
+  @@index([tenantId])
+  @@index([branchId])
+  @@map("components")
+}
+
+// ============================================================================
+// ASSEMBLY
+// ============================================================================
+
+model AssemblyOrder {
+  id           String         @id @default(cuid())
+  code         String         @unique
+  status       AssemblyStatus @default(DRAFT)
+  repairCost   Decimal        @default(0) @map("repair_cost") @db.Decimal(18, 2)
+  cleaningCost Decimal        @default(0) @map("cleaning_cost") @db.Decimal(18, 2)
+  assemblyCost Decimal        @default(0) @map("assembly_cost") @db.Decimal(18, 2)
+  notes        String?
+  startedAt    DateTime?      @map("started_at")
+  completedAt  DateTime?      @map("completed_at")
+  tenantId     String?        @map("tenant_id")
+  branchId     String?        @map("branch_id")
+  createdById  String?        @map("created_by_id")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+
+  createdBy   User?          @relation("AssemblyOrderCreatedBy", fields: [createdById], references: [id])
+  items       AssemblyItem[]
+  finishedPcs FinishedPc[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@index([tenantId])
+  @@index([branchId])
+  @@map("assembly_orders")
+}
+
+model AssemblyItem {
+  id              String   @id @default(cuid())
+  assemblyOrderId String   @map("assembly_order_id")
+  componentId     String   @map("component_id")
+  unitCost        Decimal  @default(0) @map("unit_cost") @db.Decimal(18, 2)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  assemblyOrder AssemblyOrder @relation(fields: [assemblyOrderId], references: [id], onDelete: Cascade)
+  component     Component     @relation(fields: [componentId], references: [id])
+
+  @@unique([assemblyOrderId, componentId])
+  @@index([componentId])
+  @@map("assembly_items")
+}
+
+// ============================================================================
+// FINISHED PCs
+// ============================================================================
+
+model FinishedPc {
+  id              String           @id @default(cuid())
+  code            String           @unique // PC...
+  assemblyOrderId String?          @map("assembly_order_id")
+  status          FinishedPcStatus @default(DRAFT)
+  costPrice       Decimal          @default(0) @map("cost_price") @db.Decimal(18, 2)
+  suggestedPrice  Decimal          @default(0) @map("suggested_price") @db.Decimal(18, 2)
+  soldPrice       Decimal?         @map("sold_price") @db.Decimal(18, 2)
+  notes           String?
+  readyAt         DateTime?        @map("ready_at")
+  soldAt          DateTime?        @map("sold_at")
+  tenantId        String?          @map("tenant_id")
+  branchId        String?          @map("branch_id")
+  createdById     String?          @map("created_by_id")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
+  assemblyOrder     AssemblyOrder?        @relation(fields: [assemblyOrderId], references: [id])
+  createdBy         User?                 @relation("FinishedPcCreatedBy", fields: [createdById], references: [id])
+  componentLinks    FinishedPcComponent[]
+  currentComponents Component[]           @relation("ComponentCurrentFinishedPc")
+  salesItems        SalesItem[]
+  warrantyCases     WarrantyCase[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@index([tenantId])
+  @@index([branchId])
+  @@map("finished_pcs")
+}
+
+model FinishedPcComponent {
+  id           String    @id @default(cuid())
+  finishedPcId String    @map("finished_pc_id")
+  componentId  String    @map("component_id")
+  // installedAt / removedAt let us trace a component through multiple machines:
+  // when a component is swapped out, set removedAt; a new row is inserted for
+  // the next installation.
+  installedAt  DateTime  @default(now()) @map("installed_at")
+  removedAt    DateTime? @map("removed_at")
+  notes        String?
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  finishedPc FinishedPc @relation(fields: [finishedPcId], references: [id], onDelete: Cascade)
+  component  Component  @relation(fields: [componentId], references: [id])
+
+  @@index([finishedPcId])
+  @@index([componentId])
+  @@index([removedAt])
+  @@map("finished_pc_components")
+}
+
+// ============================================================================
+// SALES
+// ============================================================================
+
+model SalesOrder {
+  id          String           @id @default(cuid())
+  code        String           @unique
+  customerId  String?          @map("customer_id")
+  status      SalesOrderStatus @default(DRAFT)
+  totalAmount Decimal          @default(0) @map("total_amount") @db.Decimal(18, 2)
+  discount    Decimal          @default(0) @db.Decimal(18, 2)
+  notes       String?
+  confirmedAt DateTime?        @map("confirmed_at")
+  cancelledAt DateTime?        @map("cancelled_at")
+  refundedAt  DateTime?        @map("refunded_at")
+  tenantId    String?          @map("tenant_id")
+  branchId    String?          @map("branch_id")
+  createdById String?          @map("created_by_id")
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+
+  customer  Customer?   @relation(fields: [customerId], references: [id])
+  createdBy User?       @relation("SalesOrderCreatedBy", fields: [createdById], references: [id])
+  items     SalesItem[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@index([customerId])
+  @@index([tenantId])
+  @@index([branchId])
+  @@map("sales_orders")
+}
+
+// SalesItem is polymorphic: itemType discriminates between FINISHED_PC and
+// COMPONENT. Exactly one of finishedPcId / componentId is set per row.
+model SalesItem {
+  id           String        @id @default(cuid())
+  salesOrderId String        @map("sales_order_id")
+  itemType     SalesItemType @map("item_type")
+  finishedPcId String?       @map("finished_pc_id")
+  componentId  String?       @map("component_id")
+  quantity     Int           @default(1)
+  unitPrice    Decimal       @map("unit_price") @db.Decimal(18, 2)
+  unitCost     Decimal       @default(0) @map("unit_cost") @db.Decimal(18, 2)
+  totalPrice   Decimal       @map("total_price") @db.Decimal(18, 2)
+  notes        String?
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+
+  salesOrder SalesOrder  @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  finishedPc FinishedPc? @relation(fields: [finishedPcId], references: [id])
+  component  Component?  @relation(fields: [componentId], references: [id])
+
+  @@index([salesOrderId])
+  @@index([itemType])
+  @@index([finishedPcId])
+  @@index([componentId])
+  @@map("sales_items")
+}
+
+// ============================================================================
+// STOCK TRANSACTIONS (append-only ledger)
+// ============================================================================
+
+model StockTransaction {
+  id          String       @id @default(cuid())
+  type        StockTxnType
+  componentId String       @map("component_id")
+  quantity    Int          @default(1) // serialised inventory — almost always 1
+  reason      String
+  refType     String?      @map("ref_type") // e.g. "PURCHASE_ORDER", "ASSEMBLY_ORDER", "SALES_ORDER", "WARRANTY_CASE"
+  refId       String?      @map("ref_id")
+  notes       String?
+  tenantId    String?      @map("tenant_id")
+  branchId    String?      @map("branch_id")
+  createdById String?      @map("created_by_id")
+  createdAt   DateTime     @default(now()) @map("created_at")
+
+  component Component @relation(fields: [componentId], references: [id])
+  createdBy User?     @relation("StockTxnCreatedBy", fields: [createdById], references: [id])
+
+  @@index([componentId])
+  @@index([createdAt])
+  @@index([type])
+  @@index([refType, refId])
+  @@index([tenantId])
+  @@index([branchId])
+  @@map("stock_transactions")
+}
+
+// ============================================================================
+// WARRANTY
+// ============================================================================
+
+model WarrantyCase {
+  id           String         @id @default(cuid())
+  code         String         @unique
+  customerId   String?        @map("customer_id")
+  finishedPcId String?        @map("finished_pc_id")
+  status       WarrantyStatus @default(RECEIVED)
+  description  String
+  resolution   String?
+  receivedAt   DateTime       @default(now()) @map("received_at")
+  completedAt  DateTime?      @map("completed_at")
+  tenantId     String?        @map("tenant_id")
+  branchId     String?        @map("branch_id")
+  createdById  String?        @map("created_by_id")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+
+  customer   Customer?      @relation(fields: [customerId], references: [id])
+  finishedPc FinishedPc?    @relation(fields: [finishedPcId], references: [id])
+  createdBy  User?          @relation("WarrantyCaseCreatedBy", fields: [createdById], references: [id])
+  items      WarrantyItem[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@index([customerId])
+  @@index([finishedPcId])
+  @@index([tenantId])
+  @@index([branchId])
+  @@map("warranty_cases")
+}
+
+// One warranty case can replace multiple components: each row pairs an
+// optional removed component with an optional replacement component. Either
+// side may be null (e.g. just adding a part, or just removing a defective one).
+model WarrantyItem {
+  id                     String   @id @default(cuid())
+  warrantyCaseId         String   @map("warranty_case_id")
+  removedComponentId     String?  @map("removed_component_id")
+  replacementComponentId String?  @map("replacement_component_id")
+  notes                  String?
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  warrantyCase         WarrantyCase @relation(fields: [warrantyCaseId], references: [id], onDelete: Cascade)
+  removedComponent     Component?   @relation("WarrantyItemRemoved", fields: [removedComponentId], references: [id])
+  replacementComponent Component?   @relation("WarrantyItemReplacement", fields: [replacementComponentId], references: [id])
+
+  @@index([warrantyCaseId])
+  @@map("warranty_items")
+}
+
+// ============================================================================
+// EXPENSES, ATTACHMENTS, AUDIT
+// ============================================================================
+
+model Expense {
+  id          String   @id @default(cuid())
+  category    String // e.g. "REPAIR", "CLEANING", "RENT", "UTILITIES", ...
+  amount      Decimal  @db.Decimal(18, 2)
+  description String
+  refType     String?  @map("ref_type") // optional link: MACHINE / ASSEMBLY_ORDER / ...
+  refId       String?  @map("ref_id")
+  incurredAt  DateTime @default(now()) @map("incurred_at")
+  tenantId    String?  @map("tenant_id")
+  branchId    String?  @map("branch_id")
+  createdById String?  @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  createdBy User? @relation("ExpenseCreatedBy", fields: [createdById], references: [id])
+
+  @@index([category])
+  @@index([incurredAt])
+  @@index([refType, refId])
+  @@index([tenantId])
+  @@index([branchId])
+  @@map("expenses")
+}
+
+// Attachment schema follows ARCHITECTURE.md section 16.
+model Attachment {
+  id          String   @id @default(cuid())
+  fileName    String   @map("file_name")
+  fileUrl     String   @map("file_url")
+  fileType    String   @map("file_type") // photo, invoice, qr, report, ...
+  mimeType    String   @map("mime_type")
+  size        Int
+  relatedType String   @map("related_type") // MACHINE / COMPONENT / SALES_ORDER / ...
+  relatedId   String   @map("related_id")
+  tenantId    String?  @map("tenant_id")
+  branchId    String?  @map("branch_id")
+  createdById String?  @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  createdBy User? @relation("AttachmentCreatedBy", fields: [createdById], references: [id])
+
+  @@index([relatedType, relatedId])
+  @@index([fileType])
+  @@index([tenantId])
+  @@index([branchId])
+  @@map("attachments")
+}
+
+// Audit log schema follows ARCHITECTURE.md section 17.
+model AuditLog {
+  id          String   @id @default(cuid())
+  actorUserId String?  @map("actor_user_id")
+  action      String // e.g. "component.update", "sales_order.confirm"
+  entityType  String   @map("entity_type")
+  entityId    String   @map("entity_id")
+  beforeJson  Json?    @map("before_json")
+  afterJson   Json?    @map("after_json")
+  ip          String?
+  userAgent   String?  @map("user_agent")
+  tenantId    String?  @map("tenant_id")
+  branchId    String?  @map("branch_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  actor User? @relation("AuditLogActor", fields: [actorUserId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([actorUserId])
+  @@index([action])
+  @@index([createdAt])
+  @@index([tenantId])
+  @@index([branchId])
+  @@map("audit_logs")
+}
