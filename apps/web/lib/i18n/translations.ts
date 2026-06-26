@@ -1,0 +1,188 @@
+export type Lang = "vi" | "zh-TW";
+
+export const LANGUAGES: { code: Lang; label: string; flag: string }[] = [
+  { code: "vi", label: "Tiếng Việt", flag: "🇻🇳" },
+  { code: "zh-TW", label: "繁體中文", flag: "🇹🇼" },
+];
+
+type Dict = Record<string, string>;
+
+const vi: Dict = {
+  "app.name": "PC Refurbish",
+  "app.tagline": "Quản lý cửa hàng",
+
+  "nav.home": "Trang chủ",
+  "nav.purchase": "Mua hàng",
+  "nav.machine": "Máy tính",
+  "nav.component": "Linh kiện",
+  "nav.inventory": "Kho hàng",
+  "nav.assembly": "Lắp ráp",
+  "nav.finished_pc": "Máy thành phẩm",
+  "nav.sale": "Bán hàng",
+  "nav.warranty": "Bảo hành",
+  "nav.report": "Báo cáo",
+  "nav.expense": "Chi phí",
+  "nav.category": "Danh mục",
+  "nav.setting": "Cài đặt",
+  "nav.audit": "Nhật ký hoạt động",
+
+  "branch.current": "Chi nhánh hiện tại",
+  "branch.main": "Cửa hàng chính",
+
+  "topbar.search": "Tìm kiếm linh kiện, máy, đơn hàng...",
+  "topbar.logout": "Đăng xuất",
+  "topbar.profile": "Hồ sơ",
+  "topbar.language": "Ngôn ngữ",
+
+  "page.dashboard.title": "Dashboard",
+  "page.dashboard.subtitle": "Tổng quan hoạt động cửa hàng",
+
+  "kpi.revenue_today": "Doanh thu hôm nay",
+  "kpi.profit_today": "Lợi nhuận hôm nay",
+  "kpi.inventory_value": "Giá trị tồn kho",
+  "kpi.finished_pc": "Máy thành phẩm",
+  "kpi.component_stock": "Linh kiện tồn kho",
+  "kpi.vs_yesterday": "so với hôm qua",
+  "kpi.new_assembled": "máy mới lắp",
+  "kpi.low_stock_alert": "linh kiện sắp hết",
+
+  "chart.revenue_profit": "Doanh thu & Lợi nhuận",
+  "chart.revenue": "Doanh thu",
+  "chart.profit": "Lợi nhuận",
+  "chart.order_status": "Tình trạng đơn hàng",
+  "chart.range.7days": "7 ngày qua",
+  "chart.range.30days": "30 ngày qua",
+  "chart.total_orders": "Tổng đơn",
+  "chart.status.pending": "Chờ xử lý",
+  "chart.status.processing": "Đang xử lý",
+  "chart.status.completed": "Hoàn thành",
+  "chart.status.cancelled": "Đã hủy",
+
+  "alert.title": "Cảnh báo",
+  "alert.view_all": "Xem tất cả",
+  "alert.low_stock": "Linh kiện sắp hết hàng",
+  "alert.waiting_test": "Máy chờ kiểm tra",
+  "alert.warranty_overdue": "Bảo hành quá hạn",
+  "alert.order_overdue": "Đơn hàng quá hạn",
+  "alert.defective": "Linh kiện lỗi chờ xử lý",
+
+  "recent.purchase": "Đơn mua gần đây",
+  "recent.sale": "Đơn bán gần đây",
+  "recent.code": "Mã đơn",
+  "recent.supplier": "Nhà cung cấp",
+  "recent.customer": "Khách hàng",
+  "recent.total": "Tổng tiền",
+  "recent.status": "Trạng thái",
+  "recent.date": "Ngày tạo",
+
+  "status.confirmed": "Đã xác nhận",
+  "status.processing": "Đang xử lý",
+  "status.pending": "Chờ xác nhận",
+  "status.cancelled": "Đã hủy",
+  "status.completed": "Hoàn thành",
+  "status.delivering": "Đang giao",
+
+  "quick.title": "Thao tác nhanh",
+  "quick.buy_machine": "Mua máy cũ",
+  "quick.buy_component": "Mua linh kiện",
+  "quick.inspect": "Kiểm tra máy",
+  "quick.disassemble": "Tháo máy",
+  "quick.assemble": "Lắp ráp máy",
+  "quick.create_sale": "Tạo đơn bán",
+  "quick.import_component": "Nhập linh kiện",
+
+  "common.loading": "Đang tải...",
+  "common.empty": "Chưa có dữ liệu",
+  "common.error": "Có lỗi xảy ra",
+};
+
+const zhTW: Dict = {
+  "app.name": "PC Refurbish",
+  "app.tagline": "店鋪管理系統",
+
+  "nav.home": "首頁",
+  "nav.purchase": "採購",
+  "nav.machine": "電腦",
+  "nav.component": "零件",
+  "nav.inventory": "倉庫",
+  "nav.assembly": "組裝",
+  "nav.finished_pc": "成品電腦",
+  "nav.sale": "銷售",
+  "nav.warranty": "保固",
+  "nav.report": "報表",
+  "nav.expense": "費用",
+  "nav.category": "類別",
+  "nav.setting": "設定",
+  "nav.audit": "操作日誌",
+
+  "branch.current": "目前分店",
+  "branch.main": "主店",
+
+  "topbar.search": "搜尋零件、電腦、訂單...",
+  "topbar.logout": "登出",
+  "topbar.profile": "個人資料",
+  "topbar.language": "語言",
+
+  "page.dashboard.title": "儀表板",
+  "page.dashboard.subtitle": "店鋪營運總覽",
+
+  "kpi.revenue_today": "今日營收",
+  "kpi.profit_today": "今日利潤",
+  "kpi.inventory_value": "庫存價值",
+  "kpi.finished_pc": "成品電腦",
+  "kpi.component_stock": "零件庫存",
+  "kpi.vs_yesterday": "與昨日相比",
+  "kpi.new_assembled": "台新組裝",
+  "kpi.low_stock_alert": "個零件即將缺貨",
+
+  "chart.revenue_profit": "營收與利潤",
+  "chart.revenue": "營收",
+  "chart.profit": "利潤",
+  "chart.order_status": "訂單狀態",
+  "chart.range.7days": "過去 7 天",
+  "chart.range.30days": "過去 30 天",
+  "chart.total_orders": "總訂單",
+  "chart.status.pending": "待處理",
+  "chart.status.processing": "處理中",
+  "chart.status.completed": "已完成",
+  "chart.status.cancelled": "已取消",
+
+  "alert.title": "警示",
+  "alert.view_all": "查看全部",
+  "alert.low_stock": "零件即將缺貨",
+  "alert.waiting_test": "等待檢測的電腦",
+  "alert.warranty_overdue": "保固逾期",
+  "alert.order_overdue": "訂單逾期",
+  "alert.defective": "待處理的瑕疵零件",
+
+  "recent.purchase": "最近採購單",
+  "recent.sale": "最近銷售單",
+  "recent.code": "單號",
+  "recent.supplier": "供應商",
+  "recent.customer": "客戶",
+  "recent.total": "總金額",
+  "recent.status": "狀態",
+  "recent.date": "建立日期",
+
+  "status.confirmed": "已確認",
+  "status.processing": "處理中",
+  "status.pending": "待確認",
+  "status.cancelled": "已取消",
+  "status.completed": "已完成",
+  "status.delivering": "配送中",
+
+  "quick.title": "快速操作",
+  "quick.buy_machine": "採購舊機",
+  "quick.buy_component": "採購零件",
+  "quick.inspect": "檢測電腦",
+  "quick.disassemble": "拆解電腦",
+  "quick.assemble": "組裝電腦",
+  "quick.create_sale": "建立銷售單",
+  "quick.import_component": "入庫零件",
+
+  "common.loading": "載入中...",
+  "common.empty": "暫無資料",
+  "common.error": "發生錯誤",
+};
+
+export const TRANSLATIONS: Record<Lang, Dict> = { vi, "zh-TW": zhTW };
