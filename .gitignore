@@ -46,3 +46,4 @@ docker/volumes/
 # Uploads (local dev)
 uploads/
 tmp/
+pnpm-lock.yaml
