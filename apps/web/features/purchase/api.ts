@@ -81,6 +81,17 @@ export async function createSupplier(
 }
 
 function unwrap<T>(payload: any): T {
+  if (payload && Array.isArray(payload.items) && typeof payload.total === "number") {
+    return {
+      data: payload.items,
+      meta: {
+        page: payload.page,
+        pageSize: payload.pageSize,
+        total: payload.total,
+        totalPages: payload.totalPages,
+      },
+    } as unknown as T;
+  }
   return (payload?.data ?? payload) as T;
 }
 
