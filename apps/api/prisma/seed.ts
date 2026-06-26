@@ -73,6 +73,7 @@ const PERMISSIONS: string[] = [
 
   "sale:view",
   "sale:create",
+  "sale:update",
   "sale:cancel",
 
   "warranty:view",
@@ -108,7 +109,7 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     "inventory:view", "inventory:adjust",
     "assembly:view", "assembly:create", "assembly:update", "assembly:complete", "assembly:cancel",
     "finished_pc:view", "finished_pc:update",
-    "sale:view", "sale:create", "sale:cancel",
+    "sale:view", "sale:create", "sale:update", "sale:cancel",
     "warranty:view", "warranty:create", "warranty:update",
     "report:view",
     "audit:view",
@@ -138,7 +139,7 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
   SALES: [
     "dashboard:view",
     "customer:view", "customer:create", "customer:update",
-    "sale:view", "sale:create", "sale:cancel",
+    "sale:view", "sale:create", "sale:update", "sale:cancel",
     "warranty:view", "warranty:create", "warranty:update",
     "finished_pc:view",
     "component:view",

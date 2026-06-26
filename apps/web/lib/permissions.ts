@@ -53,6 +53,7 @@ export const PERM = {
 
   SALE_VIEW: "sale:view",
   SALE_CREATE: "sale:create",
+  SALE_UPDATE: "sale:update",
   SALE_CANCEL: "sale:cancel",
 
   WARRANTY_VIEW: "warranty:view",

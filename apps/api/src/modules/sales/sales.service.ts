@@ -72,8 +72,9 @@ export class SalesService {
     return paginate(projected, total, q.page ?? 1, q.pageSize ?? 20);
   }
 
-  async get(id: string) {
-    const item = await this.prisma.salesOrder.findUnique({
+  async get(id: string, tx?: Prisma.TransactionClient) {
+    const client: Prisma.TransactionClient | PrismaService = tx ?? this.prisma;
+    const item = await (client as Prisma.TransactionClient).salesOrder.findUnique({
       where: { id },
       include: {
         customer: true,
@@ -259,7 +260,7 @@ export class SalesService {
         tx,
       );
 
-      return this.get(order.id);
+      return this.get(order.id, tx);
     });
   }
 
@@ -323,7 +324,7 @@ export class SalesService {
         { action: "sale.update", entityType: "SalesOrder", entityId: id, before, after },
         tx,
       );
-      return this.get(id);
+      return this.get(id, tx);
     });
   }
 
@@ -361,10 +362,18 @@ export class SalesService {
               HttpStatus.CONFLICT,
             );
           }
-          if (it.finishedPc.status !== FinishedPcStatus.READY_FOR_SALE) {
+          const pcUpdate = await tx.finishedPc.updateMany({
+            where: { id: it.finishedPc.id, status: FinishedPcStatus.READY_FOR_SALE },
+            data: {
+              status: FinishedPcStatus.SOLD,
+              soldPrice: it.unitPrice,
+              soldAt: new Date(),
+            },
+          });
+          if (pcUpdate.count !== 1) {
             throw new BusinessError(
               "FINISHED_PC_NOT_SELLABLE",
-              `Finished PC ${it.finishedPc.code} status changed to ${it.finishedPc.status}`,
+              `Finished PC ${it.finishedPc.code} khong con san sang ban`,
               HttpStatus.CONFLICT,
             );
           }
@@ -374,27 +383,26 @@ export class SalesService {
             data: { unitCost: itemCost },
           });
 
-          await tx.finishedPc.update({
-            where: { id: it.finishedPc.id },
-            data: {
-              status: FinishedPcStatus.SOLD,
-              soldPrice: it.unitPrice,
-              soldAt: new Date(),
-            },
-          });
-
           for (const c of it.finishedPc.currentComponents) {
-            await this.stock.create(
+            const ok = await this.stock.tryTransitionComponent(
+              c.id,
+              c.status,
+              ComponentStatus.SOLD,
               {
-                componentId: c.id,
                 type: StockTxnType.OUT,
                 reason: `Sold via ${before.code}`,
                 refType: "SALES_ORDER",
                 refId: before.id,
-                newComponentStatus: ComponentStatus.SOLD,
               },
               tx,
             );
+            if (!ok) {
+              throw new BusinessError(
+                "COMPONENT_NOT_SELLABLE",
+                `Linh kien ${c.code} khong con kha dung`,
+                HttpStatus.CONFLICT,
+              );
+            }
           }
         } else if (it.itemType === SalesItemType.COMPONENT) {
           if (!it.component) {
@@ -404,10 +412,22 @@ export class SalesService {
               HttpStatus.CONFLICT,
             );
           }
-          if (it.component.status !== ComponentStatus.IN_STOCK) {
+          const ok = await this.stock.tryTransitionComponent(
+            it.component.id,
+            ComponentStatus.IN_STOCK,
+            ComponentStatus.SOLD,
+            {
+              type: StockTxnType.OUT,
+              reason: `Sold via ${before.code}`,
+              refType: "SALES_ORDER",
+              refId: before.id,
+            },
+            tx,
+          );
+          if (!ok) {
             throw new BusinessError(
               "COMPONENT_NOT_SELLABLE",
-              `Component ${it.component.code} status changed to ${it.component.status}`,
+              `Linh kien ${it.component.code} khong con kha dung`,
               HttpStatus.CONFLICT,
             );
           }
@@ -416,17 +436,6 @@ export class SalesService {
             where: { id: it.id },
             data: { unitCost: itemCost },
           });
-          await this.stock.create(
-            {
-              componentId: it.component.id,
-              type: StockTxnType.OUT,
-              reason: `Sold via ${before.code}`,
-              refType: "SALES_ORDER",
-              refId: before.id,
-              newComponentStatus: ComponentStatus.SOLD,
-            },
-            tx,
-          );
         }
         totalAmount += Number(it.unitPrice) * it.quantity;
       }
@@ -443,7 +452,7 @@ export class SalesService {
         { action: "sale.confirm", entityType: "SalesOrder", entityId: id, before, after },
         tx,
       );
-      return this.get(id);
+      return this.get(id, tx);
     });
   }
 
@@ -527,7 +536,7 @@ export class SalesService {
         { action: "sale.cancel", entityType: "SalesOrder", entityId: id, before, after },
         tx,
       );
-      return this.get(id);
+      return this.get(id, tx);
     });
   }
 }

@@ -18,7 +18,7 @@ export class SalesController {
   @Get(":id") @Permissions("sale:view")
   get(@Param("id") id: string) { return this.svc.get(id); }
 
-  @Patch(":id") @Permissions("sale:create")
+  @Patch(":id") @Permissions("sale:update")
   update(@Param("id") id: string, @Body() dto: UpdateSaleDto) {
     return this.svc.update(id, dto);
   }

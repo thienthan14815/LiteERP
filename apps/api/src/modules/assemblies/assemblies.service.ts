@@ -63,8 +63,9 @@ export class AssembliesService {
     return paginate(projected, total, q.page ?? 1, q.pageSize ?? 20);
   }
 
-  async get(id: string) {
-    const item = await this.prisma.assemblyOrder.findUnique({
+  async get(id: string, tx?: Prisma.TransactionClient) {
+    const client: Prisma.TransactionClient | PrismaService = tx ?? this.prisma;
+    const item = await (client as Prisma.TransactionClient).assemblyOrder.findUnique({
       where: { id },
       include: {
         items: {
@@ -172,7 +173,19 @@ export class AssembliesService {
             unitCost: c.costPrice,
           },
         });
-        await this.stock.reserve(it.componentId, "ASSEMBLY_ORDER", order.id, tx);
+        const reserved = await this.stock.reserveAtomic(
+          it.componentId,
+          "ASSEMBLY_ORDER",
+          order.id,
+          tx,
+        );
+        if (!reserved) {
+          throw new BusinessError(
+            "COMPONENT_NOT_AVAILABLE",
+            `Linh kien ${c.code} khong con kha dung`,
+            HttpStatus.CONFLICT,
+          );
+        }
       }
 
       await this.audit.record(
@@ -180,7 +193,7 @@ export class AssembliesService {
         tx,
       );
 
-      return this.get(order.id);
+      return this.get(order.id, tx);
     });
   }
 
@@ -248,7 +261,14 @@ export class AssembliesService {
           );
         }
         for (const cid of toReserve) {
-          await this.stock.reserve(cid, "ASSEMBLY_ORDER", id, tx);
+          const reserved = await this.stock.reserveAtomic(cid, "ASSEMBLY_ORDER", id, tx);
+          if (!reserved) {
+            throw new BusinessError(
+              "COMPONENT_NOT_AVAILABLE",
+              `Linh kien ${cid} khong con kha dung`,
+              HttpStatus.CONFLICT,
+            );
+          }
         }
 
         await tx.assemblyItem.deleteMany({
@@ -284,7 +304,7 @@ export class AssembliesService {
         tx,
       );
 
-      return this.get(id);
+      return this.get(id, tx);
     });
   }
 
@@ -322,7 +342,7 @@ export class AssembliesService {
         { action: "assembly.start", entityType: "AssemblyOrder", entityId: id, before, after },
         tx,
       );
-      return this.get(id);
+      return this.get(id, tx);
     });
   }
 
@@ -375,10 +395,9 @@ export class AssembliesService {
         data: {
           code: pcCode,
           assemblyOrderId: before.id,
-          status: FinishedPcStatus.READY_FOR_SALE,
+          status: FinishedPcStatus.ASSEMBLING,
           costPrice,
           suggestedPrice: 0,
-          readyAt: new Date(),
           createdById: this.ctx.getUserId() ?? null,
         },
       });
@@ -424,7 +443,7 @@ export class AssembliesService {
         tx,
       );
 
-      return this.get(id);
+      return this.get(id, tx);
     });
   }
 
@@ -464,7 +483,7 @@ export class AssembliesService {
         { action: "assembly.cancel", entityType: "AssemblyOrder", entityId: id, before, after },
         tx,
       );
-      return this.get(id);
+      return this.get(id, tx);
     });
   }
 }

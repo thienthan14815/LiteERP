@@ -82,6 +82,11 @@ export class StockTransactionService {
     reason: string,
     tx: PrismaTxClient,
   ) {
+    const client = (tx ?? this.prisma) as Prisma.TransactionClient;
+    const component = await client.component.findUnique({ where: { id: componentId } });
+    if (!component || component.status !== ComponentStatus.RESERVED) {
+      return null;
+    }
     return this.create(
       {
         componentId,
@@ -90,6 +95,62 @@ export class StockTransactionService {
         refType,
         refId,
         newComponentStatus: ComponentStatus.IN_STOCK,
+      },
+      tx,
+    );
+  }
+
+  /**
+   * Atomically transition a component from `fromStatus` to `toStatus`, returning
+   * true on success or false if the component is no longer in `fromStatus`.
+   * Also appends a stock transaction row for audit.
+   */
+  async tryTransitionComponent(
+    componentId: string,
+    fromStatus: ComponentStatus,
+    toStatus: ComponentStatus,
+    txnInput: Omit<StockTxnInput, "componentId" | "newComponentStatus">,
+    tx: PrismaTxClient,
+  ): Promise<boolean> {
+    const client = (tx ?? this.prisma) as Prisma.TransactionClient;
+    const updated = await client.component.updateMany({
+      where: { id: componentId, status: fromStatus },
+      data: { status: toStatus },
+    });
+    if (updated.count !== 1) {
+      return false;
+    }
+    const userId = this.ctx.getUserId();
+    await client.stockTransaction.create({
+      data: {
+        type: txnInput.type,
+        componentId,
+        quantity: txnInput.quantity ?? 1,
+        reason: txnInput.reason,
+        refType: txnInput.refType ?? null,
+        refId: txnInput.refId ?? null,
+        notes: txnInput.notes ?? null,
+        createdById: userId ?? null,
+      },
+    });
+    return true;
+  }
+
+  async reserveAtomic(
+    componentId: string,
+    refType: string,
+    refId: string,
+    tx: PrismaTxClient,
+  ): Promise<boolean> {
+    return this.tryTransitionComponent(
+      componentId,
+      ComponentStatus.IN_STOCK,
+      ComponentStatus.RESERVED,
+      {
+        type: StockTxnType.ADJUSTMENT,
+        reason: "Reserved for assembly",
+        refType,
+        refId,
       },
       tx,
     );

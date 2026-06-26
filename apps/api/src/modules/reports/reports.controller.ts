@@ -27,17 +27,12 @@ export class ReportsController {
     monthStart.setHours(0, 0, 0, 0);
 
     const [
-      revenueAgg,
       salesItemsThisMonth,
       machineByStatus,
       componentByStatus,
       awaitingInspection,
       inventoryValueRows,
     ] = await Promise.all([
-      this.prisma.salesOrder.aggregate({
-        where: { status: SalesOrderStatus.CONFIRMED, confirmedAt: { gte: monthStart } },
-        _sum: { totalAmount: true },
-      }),
       this.prisma.salesItem.findMany({
         where: {
           salesOrder: {
@@ -62,8 +57,7 @@ export class ReportsController {
       }),
     ]);
 
-    const revenue = Number(revenueAgg._sum.totalAmount ?? 0);
-    const revenueFromItems = salesItemsThisMonth.reduce(
+    const revenue = salesItemsThisMonth.reduce(
       (s, it) => s + Number(it.unitPrice) * it.quantity,
       0,
     );
@@ -71,7 +65,7 @@ export class ReportsController {
       (s, it) => s + Number(it.unitCost) * it.quantity,
       0,
     );
-    const profit = revenueFromItems - costFromItems;
+    const profit = revenue - costFromItems;
     const inventoryValue = inventoryValueRows.reduce((s, r) => s + Number(r.costPrice), 0);
 
     return {
@@ -93,7 +87,7 @@ export class ReportsController {
   @Permissions("report:view")
   async profit(@Query() q: ProfitQueryDto) {
     const from = q.fromDate ? new Date(q.fromDate) : firstDayOfMonth();
-    const to = q.toDate ? new Date(q.toDate) : new Date();
+    const to = q.toDate ? endOfDay(new Date(q.toDate)) : new Date();
 
     const [orders, items] = await Promise.all([
       this.prisma.salesOrder.findMany({
@@ -139,5 +133,10 @@ function firstDayOfMonth(): Date {
   const d = new Date();
   d.setDate(1);
   d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function endOfDay(d: Date): Date {
+  d.setHours(23, 59, 59, 999);
   return d;
 }
