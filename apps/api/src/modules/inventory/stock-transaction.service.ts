@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { HttpStatus, Injectable } from "@nestjs/common";
 import { ComponentStatus, Prisma, StockTxnType } from "@prisma/client";
 import { PrismaService } from "../../database/prisma.service";
 import { RequestContextService } from "../../common/context/request-context.service";
@@ -32,7 +32,11 @@ export class StockTransactionService {
       where: { id: input.componentId },
     });
     if (!component) {
-      throw new BusinessError("COMPONENT_NOT_FOUND", `Component ${input.componentId} not found`, 404 as any);
+      throw new BusinessError(
+        "COMPONENT_NOT_FOUND",
+        `Component ${input.componentId} not found`,
+        HttpStatus.NOT_FOUND,
+      );
     }
     const userId = this.ctx.getUserId();
     const txn = await (client as Prisma.TransactionClient).stockTransaction.create({
@@ -54,5 +58,40 @@ export class StockTransactionService {
       });
     }
     return txn;
+  }
+
+  // Convenience wrappers for Phase 2 status-only transitions.
+  async reserve(componentId: string, refType: string, refId: string, tx: PrismaTxClient) {
+    return this.create(
+      {
+        componentId,
+        type: StockTxnType.ADJUSTMENT,
+        reason: "Reserved for assembly",
+        refType,
+        refId,
+        newComponentStatus: ComponentStatus.RESERVED,
+      },
+      tx,
+    );
+  }
+
+  async releaseReservation(
+    componentId: string,
+    refType: string,
+    refId: string,
+    reason: string,
+    tx: PrismaTxClient,
+  ) {
+    return this.create(
+      {
+        componentId,
+        type: StockTxnType.ADJUSTMENT,
+        reason,
+        refType,
+        refId,
+        newComponentStatus: ComponentStatus.IN_STOCK,
+      },
+      tx,
+    );
   }
 }

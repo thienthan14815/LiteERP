@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   Card,
   CardContent,
@@ -16,11 +17,12 @@ interface KpiCardProps {
   title: string;
   value: string;
   description?: string;
+  href?: string;
 }
 
-function KpiCard({ title, value, description }: KpiCardProps) {
-  return (
-    <Card>
+function KpiCard({ title, value, description, href }: KpiCardProps) {
+  const inner = (
+    <Card className={href ? "transition-colors hover:bg-accent/40" : undefined}>
       <CardHeader className="pb-2">
         <CardDescription>{title}</CardDescription>
         <CardTitle className="text-2xl">{value}</CardTitle>
@@ -32,6 +34,7 @@ function KpiCard({ title, value, description }: KpiCardProps) {
       )}
     </Card>
   );
+  return href ? <Link href={href}>{inner}</Link> : inner;
 }
 
 export default function DashboardPage() {
@@ -59,8 +62,16 @@ export default function DashboardPage() {
       )}
       {data && (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <KpiCard title="Doanh thu" value={formatVnd(data.revenue)} />
-          <KpiCard title="Lợi nhuận" value={formatVnd(data.profit)} />
+          <KpiCard
+            title="Doanh thu tháng"
+            value={formatVnd(data.revenue)}
+            href="/reports"
+          />
+          <KpiCard
+            title="Lợi nhuận tháng"
+            value={formatVnd(data.profit)}
+            href="/reports"
+          />
           <KpiCard
             title="Giá trị tồn kho"
             value={formatVnd(data.inventoryValue)}

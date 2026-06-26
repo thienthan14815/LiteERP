@@ -26,33 +26,57 @@ export class ReportsController {
     monthStart.setDate(1);
     monthStart.setHours(0, 0, 0, 0);
 
-    const [revenueAgg, machineByStatus, componentByStatus, awaitingInspection, inventoryValueRows] =
-      await Promise.all([
-        this.prisma.salesOrder.aggregate({
-          where: { status: SalesOrderStatus.CONFIRMED, confirmedAt: { gte: monthStart } },
-          _sum: { totalAmount: true },
-        }),
-        this.prisma.machine.groupBy({
-          by: ["status"],
-          _count: { _all: true },
-        }),
-        this.prisma.component.groupBy({
-          by: ["status"],
-          _count: { _all: true },
-        }),
-        this.prisma.machine.count({ where: { status: MachineStatus.NEW } }),
-        this.prisma.component.findMany({
-          where: { status: ComponentStatus.IN_STOCK },
-          select: { costPrice: true },
-        }),
-      ]);
+    const [
+      revenueAgg,
+      salesItemsThisMonth,
+      machineByStatus,
+      componentByStatus,
+      awaitingInspection,
+      inventoryValueRows,
+    ] = await Promise.all([
+      this.prisma.salesOrder.aggregate({
+        where: { status: SalesOrderStatus.CONFIRMED, confirmedAt: { gte: monthStart } },
+        _sum: { totalAmount: true },
+      }),
+      this.prisma.salesItem.findMany({
+        where: {
+          salesOrder: {
+            status: SalesOrderStatus.CONFIRMED,
+            confirmedAt: { gte: monthStart },
+          },
+        },
+        select: { unitPrice: true, unitCost: true, quantity: true },
+      }),
+      this.prisma.machine.groupBy({
+        by: ["status"],
+        _count: { _all: true },
+      }),
+      this.prisma.component.groupBy({
+        by: ["status"],
+        _count: { _all: true },
+      }),
+      this.prisma.machine.count({ where: { status: MachineStatus.NEW } }),
+      this.prisma.component.findMany({
+        where: { status: ComponentStatus.IN_STOCK },
+        select: { costPrice: true },
+      }),
+    ]);
 
     const revenue = Number(revenueAgg._sum.totalAmount ?? 0);
+    const revenueFromItems = salesItemsThisMonth.reduce(
+      (s, it) => s + Number(it.unitPrice) * it.quantity,
+      0,
+    );
+    const costFromItems = salesItemsThisMonth.reduce(
+      (s, it) => s + Number(it.unitCost) * it.quantity,
+      0,
+    );
+    const profit = revenueFromItems - costFromItems;
     const inventoryValue = inventoryValueRows.reduce((s, r) => s + Number(r.costPrice), 0);
 
     return {
       revenueThisMonth: revenue,
-      profitThisMonth: 0, // placeholder until cost-of-goods linkage is wired
+      profitThisMonth: profit,
       inventoryValue,
       machinesByStatus: Object.fromEntries(
         machineByStatus.map((g) => [g.status, g._count._all]),
@@ -65,16 +89,42 @@ export class ReportsController {
     };
   }
 
-  // Phase 2 will compute real revenue/cost/profit. Placeholder so the FE can wire up.
   @Get("reports/profit")
   @Permissions("report:view")
-  profit(@Query() q: ProfitQueryDto) {
+  async profit(@Query() q: ProfitQueryDto) {
+    const from = q.fromDate ? new Date(q.fromDate) : firstDayOfMonth();
+    const to = q.toDate ? new Date(q.toDate) : new Date();
+
+    const [orders, items] = await Promise.all([
+      this.prisma.salesOrder.findMany({
+        where: {
+          status: SalesOrderStatus.CONFIRMED,
+          confirmedAt: { gte: from, lte: to },
+        },
+        select: { id: true },
+      }),
+      this.prisma.salesItem.findMany({
+        where: {
+          salesOrder: {
+            status: SalesOrderStatus.CONFIRMED,
+            confirmedAt: { gte: from, lte: to },
+          },
+        },
+        select: { unitPrice: true, unitCost: true, quantity: true },
+      }),
+    ]);
+
+    const revenue = items.reduce((s, it) => s + Number(it.unitPrice) * it.quantity, 0);
+    const cost = items.reduce((s, it) => s + Number(it.unitCost) * it.quantity, 0);
+    const profit = revenue - cost;
+
     return {
-      revenue: 0,
-      cost: 0,
-      profit: 0,
-      fromDate: q.fromDate ?? null,
-      toDate: q.toDate ?? null,
+      revenue,
+      cost,
+      profit,
+      salesCount: orders.length,
+      fromDate: from.toISOString(),
+      toDate: to.toISOString(),
     };
   }
 
@@ -83,4 +133,11 @@ export class ReportsController {
   inventoryValue() {
     return this.inventory.value();
   }
+}
+
+function firstDayOfMonth(): Date {
+  const d = new Date();
+  d.setDate(1);
+  d.setHours(0, 0, 0, 0);
+  return d;
 }

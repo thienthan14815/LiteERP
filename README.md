@@ -67,9 +67,10 @@ API: http://localhost:3001 — Web: http://localhost:3000 — Nginx: http://loca
 
 Default admin (after seed): `admin@example.com` / `admin1234`
 
-## Phase 1 status
+## Phase status
 
-MVP backend + frontend complete (auth, purchases, machines, components, inventory, audit log). Phase 2 (assemblies/sales) and Phase 3 (warranty/reports) pending.
+- Phase 1 complete: auth, RBAC, purchases, machines, components, inventory, audit log.
+- Phase 2 complete: assemblies, finished PCs, sales (incl. profit/cost reports). Phase 3 (warranty/repair history, advanced reports) pending.
 
 ### New Prisma models in Phase 1
 - `RefreshToken` — server-side refresh token store for rotated JWT auth.
