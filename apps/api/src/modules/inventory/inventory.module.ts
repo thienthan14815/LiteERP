@@ -1,4 +1,12 @@
-import { Module } from "@nestjs/common";
+import { Global, Module } from "@nestjs/common";
+import { InventoryService } from "./inventory.service";
+import { InventoryController } from "./inventory.controller";
+import { StockTransactionService } from "./stock-transaction.service";
 
-@Module({})
+@Global()
+@Module({
+  providers: [InventoryService, StockTransactionService],
+  controllers: [InventoryController],
+  exports: [StockTransactionService],
+})
 export class InventoryModule {}

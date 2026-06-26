@@ -1,9 +1,17 @@
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
+import { APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
+import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 
 import { typedConfig } from "./config/configuration";
 import { PrismaModule } from "./database/prisma.module";
 import { QueueModule } from "./jobs/queue.module";
+
+import { RequestContextModule } from "./common/context/request-context.module";
+import { CodeGeneratorModule } from "./common/utils/code-generator.module";
+import { RequestContextInterceptor } from "./common/interceptors/request-context.interceptor";
+import { JwtAuthGuard } from "./common/guards/jwt-auth.guard";
+import { PermissionsGuard } from "./common/guards/permissions.guard";
 
 import { AuthModule } from "./modules/auth/auth.module";
 import { UsersModule } from "./modules/users/users.module";
@@ -20,15 +28,18 @@ import { SalesModule } from "./modules/sales/sales.module";
 import { WarrantiesModule } from "./modules/warranties/warranties.module";
 import { ReportsModule } from "./modules/reports/reports.module";
 import { AuditLogsModule } from "./modules/audit-logs/audit-logs.module";
+import { HealthModule } from "./modules/health/health.module";
 
 @Module({
   imports: [
-    ConfigModule.forRoot({
-      isGlobal: true,
-      load: [typedConfig],
-    }),
+    ConfigModule.forRoot({ isGlobal: true, load: [typedConfig] }),
+    ThrottlerModule.forRoot([{ name: "default", ttl: 60_000, limit: 100 }]),
     PrismaModule,
+    RequestContextModule,
+    CodeGeneratorModule,
     QueueModule,
+    AuditLogsModule,
+    InventoryModule,
     AuthModule,
     UsersModule,
     RolesModule,
@@ -37,13 +48,18 @@ import { AuditLogsModule } from "./modules/audit-logs/audit-logs.module";
     PurchasesModule,
     MachinesModule,
     ComponentsModule,
-    InventoryModule,
     AssembliesModule,
     FinishedPcsModule,
     SalesModule,
     WarrantiesModule,
     ReportsModule,
-    AuditLogsModule,
+    HealthModule,
+  ],
+  providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: PermissionsGuard },
+    { provide: APP_INTERCEPTOR, useClass: RequestContextInterceptor },
   ],
 })
 export class AppModule {}
