@@ -70,3 +70,7 @@ Default admin (after seed): `admin@example.com` / `admin1234`
 ## Phase 0 status
 
 This is the foundation scaffold — no business logic yet. The Prisma schema is the contract for all subsequent phases.
+
+### Deferred to later phases
+- `warehouses` model — deferred to multi-branch phase (ARCHITECTURE.md §28). Stock transactions carry `branch_id` for single-warehouse-per-branch semantics until then.
+- Initial migration directory — generated on first `pnpm prisma:migrate dev --name init` once Postgres is up locally.

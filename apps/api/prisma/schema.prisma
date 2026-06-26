@@ -11,6 +11,9 @@
 // - Status fields are enums and indexed (ARCHITECTURE.md section 27).
 // - Tables that are append-only (stock_transactions, audit_logs) intentionally
 //   omit updated_at.
+// - `warehouses` model is deferred to a future multi-branch phase per
+//   ARCHITECTURE.md section 28. `stock_transactions` carries `branch_id` for
+//   single-warehouse-per-branch semantics until then.
 
 generator client {
   provider = "prisma-client-js"
@@ -422,10 +425,11 @@ model Component {
   warrantyItemsAdded   WarrantyItem[]        @relation("WarrantyItemReplacement")
   warrantyItemsRemoved WarrantyItem[]        @relation("WarrantyItemRemoved")
 
-  // Serial numbers are application-unique when present, but allow null for
-  // components without a printed serial. Postgres treats multiple NULLs as
-  // distinct in a unique index, so this works as a partial-unique substitute.
-  @@unique([serialNumber])
+  // Serial numbers are tenant-scoped unique. Postgres treats multiple NULLs as
+  // distinct in a unique index, so this works as a partial-unique substitute
+  // (components without a printed serial allowed).
+  @@unique([tenantId, serialNumber])
+  @@index([code])
   @@index([status])
   @@index([categoryId])
   @@index([sourceMachineId])
