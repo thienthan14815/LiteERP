@@ -60,6 +60,10 @@ export const PERM = {
   WARRANTY_CREATE: "warranty:create",
   WARRANTY_UPDATE: "warranty:update",
 
+  ATTACHMENT_VIEW: "attachment:view",
+  ATTACHMENT_CREATE: "attachment:create",
+  ATTACHMENT_DELETE: "attachment:delete",
+
   REPORT_VIEW: "report:view",
 
   AUDIT_VIEW: "audit:view",

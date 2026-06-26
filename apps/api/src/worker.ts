@@ -1,15 +1,30 @@
 import "reflect-metadata";
 import { Logger } from "@nestjs/common";
+import { startNotificationsWorker } from "./jobs/queues/notifications.queue";
+import { startReportsWorker } from "./jobs/queues/reports.queue";
+import { startExportsWorker } from "./jobs/queues/exports.queue";
+import { startMaintenanceWorker } from "./jobs/queues/maintenance.queue";
+import { startImagesWorker } from "./jobs/queues/images.queue";
 
-// BullMQ worker entrypoint. Phase 0 placeholder — Phase 1+ registers actual
-// processors (send-email, generate-report, export-excel, backup-database,
-// generate-qr-code, process-image, low-stock-alert — see ARCHITECTURE.md
-// section 15).
 async function bootstrap() {
   const logger = new Logger("Worker");
-  logger.log("Worker starting (no processors registered yet)...");
+  const workers = [
+    startNotificationsWorker(),
+    startReportsWorker(),
+    startExportsWorker(),
+    startMaintenanceWorker(),
+    startImagesWorker(),
+  ];
+  logger.log(`Started ${workers.length} BullMQ workers`);
 
-  // Keep the process alive.
+  const shutdown = async (signal: string) => {
+    logger.log(`Received ${signal}, draining workers...`);
+    await Promise.all(workers.map((w) => w.close()));
+    process.exit(0);
+  };
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+
   await new Promise(() => {});
 }
 

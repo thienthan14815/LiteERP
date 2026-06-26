@@ -61,38 +61,41 @@ export default function DashboardPage() {
         </Card>
       )}
       {data && (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <KpiCard
-            title="Doanh thu tháng"
-            value={formatVnd(data.revenue)}
-            href="/reports"
-          />
-          <KpiCard
-            title="Lợi nhuận tháng"
-            value={formatVnd(data.profit)}
-            href="/reports"
-          />
-          <KpiCard
-            title="Giá trị tồn kho"
-            value={formatVnd(data.inventoryValue)}
-          />
-          <KpiCard
-            title="Máy đang có"
-            value={formatNumber(data.machineCount)}
-          />
-          <KpiCard
-            title="Linh kiện tồn"
-            value={formatNumber(data.componentCount)}
-          />
-          <KpiCard
-            title="Máy chờ test"
-            value={formatNumber(data.machinesWaitingTest)}
-          />
-          <KpiCard
-            title="Đơn bảo hành"
-            value={formatNumber(data.warrantyOpen)}
-          />
-        </div>
+        <>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <KpiCard title="Doanh thu tháng" value={formatVnd(data.revenue)} href="/reports" />
+            <KpiCard title="Lợi nhuận tháng" value={formatVnd(data.profit)} href="/reports" />
+            <KpiCard title="Giá trị tồn kho" value={formatVnd(data.inventoryValue)} />
+            <KpiCard title="Máy đang có" value={formatNumber(data.machineCount)} />
+            <KpiCard title="Linh kiện tồn" value={formatNumber(data.componentCount)} />
+            <KpiCard title="Máy chờ test" value={formatNumber(data.machinesWaitingTest)} />
+            <KpiCard title="Đơn bảo hành" value={formatNumber(data.warrantyOpen)} href="/warranties" />
+          </div>
+
+          {data.attentionItems.length > 0 && (
+            <Card className="mt-6">
+              <CardHeader>
+                <CardTitle>Cần chú ý</CardTitle>
+                <CardDescription>Các đầu việc đang chờ xử lý</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ul className="divide-y">
+                  {data.attentionItems.map((item, i) => (
+                    <li key={i} className="flex items-center justify-between py-3">
+                      <span>{item.label}</span>
+                      <Link
+                        href={item.link}
+                        className="rounded-md bg-primary px-3 py-1 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                      >
+                        {formatNumber(item.count)}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          )}
+        </>
       )}
     </div>
   );

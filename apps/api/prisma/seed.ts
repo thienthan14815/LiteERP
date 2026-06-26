@@ -80,6 +80,10 @@ const PERMISSIONS: string[] = [
   "warranty:create",
   "warranty:update",
 
+  "attachment:view",
+  "attachment:create",
+  "attachment:delete",
+
   "report:view",
 
   "audit:view",
@@ -111,6 +115,7 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     "finished_pc:view", "finished_pc:update",
     "sale:view", "sale:create", "sale:update", "sale:cancel",
     "warranty:view", "warranty:create", "warranty:update",
+    "attachment:view", "attachment:create", "attachment:delete",
     "report:view",
     "audit:view",
     "setting:view",
@@ -125,6 +130,7 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     "supplier:view",
     "customer:view",
     "purchase:view",
+    "attachment:view", "attachment:create",
   ],
 
   TECHNICIAN: [
@@ -134,6 +140,8 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     "assembly:view", "assembly:create", "assembly:update", "assembly:complete", "assembly:cancel",
     "finished_pc:view", "finished_pc:update",
     "inventory:view",
+    "warranty:view", "warranty:create", "warranty:update",
+    "attachment:view", "attachment:create",
   ],
 
   SALES: [
@@ -144,6 +152,7 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     "finished_pc:view",
     "component:view",
     "inventory:view",
+    "attachment:view", "attachment:create",
   ],
 
   ACCOUNTANT: [
@@ -154,6 +163,7 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     "component:view", "machine:view", "finished_pc:view",
     "inventory:view",
     "supplier:view", "customer:view",
+    "attachment:view",
   ],
 
   VIEWER: VIEW_ONLY_PERMS,

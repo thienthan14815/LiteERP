@@ -13,6 +13,7 @@ import {
   Receipt,
   ShieldCheck,
   BarChart3,
+  ScrollText,
   Settings,
   Menu,
   LogOut,
@@ -50,6 +51,7 @@ const NAV: NavItem[] = [
   { href: "/sales", label: "Bán hàng", icon: Receipt, permission: PERM.SALE_VIEW },
   { href: "/warranties", label: "Bảo hành", icon: ShieldCheck, permission: PERM.WARRANTY_VIEW },
   { href: "/reports", label: "Báo cáo", icon: BarChart3, permission: PERM.REPORT_VIEW },
+  { href: "/audit-logs", label: "Nhật ký", icon: ScrollText, permission: PERM.AUDIT_VIEW },
   { href: "/settings", label: "Cài đặt", icon: Settings, permission: PERM.SETTING_VIEW },
 ];
 

@@ -31,6 +31,7 @@ import {
   useConfirmPurchase,
   usePurchase,
 } from "@/features/purchase/hooks";
+import { AttachmentUploader } from "@/components/forms/attachment-uploader";
 
 export default function PurchaseDetailPage() {
   const params = useParams<{ id: string }>();
@@ -188,6 +189,15 @@ export default function PurchaseDetailPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card className="mt-4">
+        <CardHeader>
+          <CardTitle>Tệp đính kèm</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <AttachmentUploader relatedType="PURCHASE_ORDER" relatedId={data.id} />
+        </CardContent>
+      </Card>
 
       <ConfirmDialog
         open={confirmOpen}

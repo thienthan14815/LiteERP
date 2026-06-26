@@ -70,7 +70,8 @@ Default admin (after seed): `admin@example.com` / `admin1234`
 ## Phase status
 
 - Phase 1 complete: auth, RBAC, purchases, machines, components, inventory, audit log.
-- Phase 2 complete: assemblies, finished PCs, sales (incl. profit/cost reports). Phase 3 (warranty/repair history, advanced reports) pending.
+- Phase 2 complete: assemblies, finished PCs, sales (incl. profit/cost reports).
+- Phase 3 complete: warranty module (intake, status workflow, component replacement), advanced reports (daily profit breakdown, sales by product, top customers, inventory aging, inventory value with top categories), audit-log viewer UI, presigned S3 attachment uploads (MinIO), and BullMQ queues (`notifications`, `reports`, `exports`, `maintenance`, `images`) wired through the worker entrypoint.
 
 ### New Prisma models in Phase 1
 - `RefreshToken` — server-side refresh token store for rotated JWT auth.
