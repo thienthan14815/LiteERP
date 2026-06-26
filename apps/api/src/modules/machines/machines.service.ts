@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { HttpStatus, Injectable, NotFoundException } from "@nestjs/common";
 import {
   ComponentStatus,
   MachineStatus,
@@ -73,7 +73,7 @@ export class MachinesService {
       throw new BusinessError(
         "INVALID_STATUS_TRANSITION",
         `Cannot inspect machine in status ${before.status}`,
-        409 as any,
+        HttpStatus.CONFLICT,
       );
     }
     return this.prisma.$transaction(async (tx) => {
@@ -130,7 +130,7 @@ export class MachinesService {
       throw new BusinessError(
         "INVALID_STATUS_TRANSITION",
         `Cannot allocate cost for machine in status ${machine.status}`,
-        409 as any,
+        HttpStatus.CONFLICT,
       );
     }
     const sum = dto.allocations.reduce((s, e) => s + Number(e.costPrice), 0);
@@ -185,7 +185,7 @@ export class MachinesService {
       throw new BusinessError(
         "INVALID_STATUS_TRANSITION",
         `Cannot disassemble machine in status ${before.status}`,
-        409 as any,
+        HttpStatus.CONFLICT,
       );
     }
     if (before.machineComponents.length === 0) {
@@ -249,7 +249,7 @@ export class MachinesService {
       throw new BusinessError(
         "INVALID_STATUS_TRANSITION",
         `Cannot mark ready for sale from status ${before.status}`,
-        409 as any,
+        HttpStatus.CONFLICT,
       );
     }
     return this.prisma.$transaction(async (tx) => {

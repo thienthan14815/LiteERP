@@ -3,42 +3,69 @@ import type { ReactNode } from "react";
 export const PERM = {
   DASHBOARD_VIEW: "dashboard:view",
 
-  PURCHASE_READ: "purchase:read",
+  USER_VIEW: "user:view",
+  USER_CREATE: "user:create",
+  USER_UPDATE: "user:update",
+  USER_DELETE: "user:delete",
+
+  ROLE_VIEW: "role:view",
+  ROLE_CREATE: "role:create",
+  ROLE_UPDATE: "role:update",
+  ROLE_DELETE: "role:delete",
+
+  SUPPLIER_VIEW: "supplier:view",
+  SUPPLIER_CREATE: "supplier:create",
+  SUPPLIER_UPDATE: "supplier:update",
+  SUPPLIER_DELETE: "supplier:delete",
+
+  CUSTOMER_VIEW: "customer:view",
+  CUSTOMER_CREATE: "customer:create",
+  CUSTOMER_UPDATE: "customer:update",
+  CUSTOMER_DELETE: "customer:delete",
+
+  PURCHASE_VIEW: "purchase:view",
   PURCHASE_CREATE: "purchase:create",
   PURCHASE_UPDATE: "purchase:update",
   PURCHASE_CONFIRM: "purchase:confirm",
   PURCHASE_CANCEL: "purchase:cancel",
 
-  MACHINE_READ: "machine:read",
+  MACHINE_VIEW: "machine:view",
   MACHINE_INSPECT: "machine:inspect",
   MACHINE_ALLOCATE_COST: "machine:allocate_cost",
   MACHINE_DISASSEMBLE: "machine:disassemble",
   MACHINE_MARK_READY: "machine:mark_ready",
 
-  COMPONENT_READ: "component:read",
-  COMPONENT_CREATE: "component:create",
+  COMPONENT_VIEW: "component:view",
   COMPONENT_UPDATE: "component:update",
-  COMPONENT_DELETE: "component:delete",
   COMPONENT_SCRAP: "component:scrap",
 
-  ASSEMBLY_READ: "assembly:read",
+  INVENTORY_VIEW: "inventory:view",
+  INVENTORY_ADJUST: "inventory:adjust",
+
+  ASSEMBLY_VIEW: "assembly:view",
   ASSEMBLY_CREATE: "assembly:create",
+  ASSEMBLY_UPDATE: "assembly:update",
   ASSEMBLY_COMPLETE: "assembly:complete",
+  ASSEMBLY_CANCEL: "assembly:cancel",
 
-  FINISHED_PC_READ: "finished-pc:read",
+  FINISHED_PC_VIEW: "finished_pc:view",
+  FINISHED_PC_UPDATE: "finished_pc:update",
 
-  SALE_READ: "sale:read",
+  SALE_VIEW: "sale:view",
   SALE_CREATE: "sale:create",
   SALE_CANCEL: "sale:cancel",
 
-  WARRANTY_READ: "warranty:read",
+  WARRANTY_VIEW: "warranty:view",
   WARRANTY_CREATE: "warranty:create",
   WARRANTY_UPDATE: "warranty:update",
 
   REPORT_VIEW: "report:view",
 
+  AUDIT_VIEW: "audit:view",
+
   SETTING_VIEW: "setting:view",
   SETTING_UPDATE: "setting:update",
+
   ADMIN_ALL: "*",
 } as const;
 

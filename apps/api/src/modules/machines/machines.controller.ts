@@ -20,7 +20,7 @@ export class MachinesController {
     return this.svc.inspect(id, dto);
   }
 
-  @Post(":id/allocate-cost") @Permissions("machine:inspect")
+  @Post(":id/allocate-cost") @Permissions("machine:allocate_cost")
   allocate(@Param("id") id: string, @Body() dto: AllocateCostDto) {
     return this.svc.allocateCost(id, dto);
   }
@@ -30,7 +30,7 @@ export class MachinesController {
     return this.svc.disassemble(id);
   }
 
-  @Post(":id/mark-ready-for-sale") @Permissions("machine:update")
+  @Post(":id/mark-ready-for-sale") @Permissions("machine:mark_ready")
   ready(@Param("id") id: string) {
     return this.svc.markReadyForSale(id);
   }

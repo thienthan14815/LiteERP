@@ -21,6 +21,6 @@ export class SuppliersController {
   @Patch(":id") @Permissions("supplier:update")
   update(@Param("id") id: string, @Body() dto: UpdateSupplierDto) { return this.svc.update(id, dto); }
 
-  @Delete(":id") @Permissions("supplier:update")
+  @Delete(":id") @Permissions("supplier:delete")
   remove(@Param("id") id: string) { return this.svc.remove(id); }
 }

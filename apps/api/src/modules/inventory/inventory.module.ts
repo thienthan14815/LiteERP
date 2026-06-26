@@ -7,6 +7,6 @@ import { StockTransactionService } from "./stock-transaction.service";
 @Module({
   providers: [InventoryService, StockTransactionService],
   controllers: [InventoryController],
-  exports: [StockTransactionService],
+  exports: [InventoryService, StockTransactionService],
 })
 export class InventoryModule {}

@@ -72,18 +72,18 @@ export class InventoryService {
       where: { status: ComponentStatus.IN_STOCK },
       select: { categoryId: true, costPrice: true, category: { select: { code: true, name: true } } },
     });
-    const byCategory = new Map<string, { code: string; name: string; total: number; count: number }>();
+    const byCategory = new Map<string, { category: string; name: string; value: number; count: number }>();
     let total = 0;
     for (const r of rows) {
       const cost = Number(r.costPrice);
       total += cost;
       const entry = byCategory.get(r.categoryId) ?? {
-        code: r.category.code,
+        category: r.category.code,
         name: r.category.name,
-        total: 0,
+        value: 0,
         count: 0,
       };
-      entry.total += cost;
+      entry.value += cost;
       entry.count += 1;
       byCategory.set(r.categoryId, entry);
     }

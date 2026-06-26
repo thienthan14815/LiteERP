@@ -56,9 +56,7 @@ export default function ComponentDetailPage() {
     );
   }
 
-  const canScrap =
-    data.status !== ComponentStatus.SOLD &&
-    data.status !== ComponentStatus.SCRAPPED;
+  const canScrap = data.status === ComponentStatus.IN_STOCK;
 
   const onScrap = async () => {
     try {

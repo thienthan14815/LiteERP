@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { HttpStatus, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../database/prisma.service";
 import { CodeGeneratorService } from "../../common/utils/code-generator.service";
@@ -47,7 +47,7 @@ export class SuppliersService {
     return this.prisma.$transaction(async (tx) => {
       const code = dto.code ?? (await this.codes.next("SUP", tx, 6));
       const existing = await tx.supplier.findUnique({ where: { code } });
-      if (existing) throw new BusinessError("SUPPLIER_CODE_TAKEN", `Code ${code} taken`, 409 as any);
+      if (existing) throw new BusinessError("SUPPLIER_CODE_TAKEN", `Code ${code} taken`, HttpStatus.CONFLICT);
       const item = await tx.supplier.create({
         data: {
           code,
@@ -102,7 +102,7 @@ export class SuppliersService {
       throw new BusinessError(
         "SUPPLIER_IN_USE",
         "Supplier has purchase orders, cannot delete",
-        409 as any,
+        HttpStatus.CONFLICT,
       );
     }
     await this.prisma.$transaction(async (tx) => {

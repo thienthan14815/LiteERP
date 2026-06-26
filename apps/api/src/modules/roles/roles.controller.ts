@@ -9,25 +9,25 @@ export class RolesController {
   constructor(private readonly svc: RolesService) {}
 
   @Get()
-  @Permissions("role:assign")
+  @Permissions("role:view")
   list() {
     return this.svc.list();
   }
 
   @Post()
-  @Permissions("role:assign")
+  @Permissions("role:create")
   create(@Body() dto: CreateRoleDto) {
     return this.svc.create(dto);
   }
 
   @Patch(":id")
-  @Permissions("role:assign")
+  @Permissions("role:update")
   update(@Param("id") id: string, @Body() dto: UpdateRoleDto) {
     return this.svc.update(id, dto);
   }
 
   @Delete(":id")
-  @Permissions("role:assign")
+  @Permissions("role:delete")
   remove(@Param("id") id: string) {
     return this.svc.remove(id);
   }

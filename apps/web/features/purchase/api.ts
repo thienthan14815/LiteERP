@@ -44,23 +44,40 @@ export interface PurchaseListQuery {
   status?: PurchaseOrderStatus | "ALL";
   search?: string;
   supplierId?: string;
-  from?: string;
-  to?: string;
+  fromDate?: string;
+  toDate?: string;
+}
+
+export interface CreatePurchaseItemInput {
+  itemType: PurchaseItemType;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  categoryCode?: ComponentCategoryCode;
+  notes?: string;
 }
 
 export interface CreatePurchaseDto {
   supplierId?: string;
-  supplierName?: string;
+  otherCost?: number;
   notes?: string;
-  items: Array<{
-    type: PurchaseItemType;
-    categoryCode?: ComponentCategoryCode;
-    model?: string;
-    serial?: string;
-    purchasePrice: number;
-    quantity?: number;
-    notes?: string;
-  }>;
+  items: CreatePurchaseItemInput[];
+}
+
+export interface CreateSupplierInput {
+  name: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  taxCode?: string;
+  notes?: string;
+}
+
+export async function createSupplier(
+  payload: CreateSupplierInput,
+): Promise<SupplierOption> {
+  const { data } = await apiClient.post("/suppliers", payload);
+  return unwrap<SupplierOption>(data);
 }
 
 function unwrap<T>(payload: any): T {

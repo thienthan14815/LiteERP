@@ -67,10 +67,22 @@ API: http://localhost:3001 — Web: http://localhost:3000 — Nginx: http://loca
 
 Default admin (after seed): `admin@example.com` / `admin1234`
 
-## Phase 0 status
+## Phase 1 status
 
-This is the foundation scaffold — no business logic yet. The Prisma schema is the contract for all subsequent phases.
+MVP backend + frontend complete (auth, purchases, machines, components, inventory, audit log). Phase 2 (assemblies/sales) and Phase 3 (warranty/reports) pending.
+
+### New Prisma models in Phase 1
+- `RefreshToken` — server-side refresh token store for rotated JWT auth.
+- `CodeCounter` — monotonic counter table backing the per-prefix code generator (`PO`, `PC`, `CPU`, …).
+
+### Phase 1 migration
+
+After first checkout, run:
+
+```bash
+pnpm --filter @app/api prisma migrate dev --name phase1_init
+pnpm --filter @app/api prisma db seed
+```
 
 ### Deferred to later phases
 - `warehouses` model — deferred to multi-branch phase (ARCHITECTURE.md §28). Stock transactions carry `branch_id` for single-warehouse-per-branch semantics until then.
-- Initial migration directory — generated on first `pnpm prisma:migrate dev --name init` once Postgres is up locally.

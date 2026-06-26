@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { HttpStatus, Injectable, NotFoundException } from "@nestjs/common";
 import {
   ComponentStatus,
   MachineStatus,
@@ -163,7 +163,7 @@ export class PurchasesService {
       throw new BusinessError(
         "INVALID_STATUS_TRANSITION",
         `Cannot update purchase in status ${before.status}`,
-        409 as any,
+        HttpStatus.CONFLICT,
       );
     }
     return this.prisma.$transaction(async (tx) => {
@@ -193,7 +193,7 @@ export class PurchasesService {
       throw new BusinessError(
         "INVALID_STATUS_TRANSITION",
         `Purchase already ${before.status}`,
-        409 as any,
+        HttpStatus.CONFLICT,
       );
     }
 
@@ -251,7 +251,7 @@ export class PurchasesService {
       throw new BusinessError(
         "INVALID_STATUS_TRANSITION",
         `Cannot cancel purchase in status ${before.status}`,
-        409 as any,
+        HttpStatus.CONFLICT,
       );
     }
     return this.prisma.$transaction(async (tx) => {

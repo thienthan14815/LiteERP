@@ -36,23 +36,25 @@ import {
   PURCHASE_ITEM_TYPE_LABEL,
 } from "@/lib/labels";
 import { useCreatePurchase } from "@/features/purchase/hooks";
+import { SupplierCombobox } from "@/features/purchase/supplier-combobox";
 
 const itemSchema = z
   .object({
-    type: z.nativeEnum(PurchaseItemType),
+    itemType: z.nativeEnum(PurchaseItemType),
     categoryCode: z.nativeEnum(ComponentCategoryCode).optional(),
-    model: z.string().optional(),
-    serial: z.string().optional(),
-    purchasePrice: z.coerce.number().nonnegative("Giá phải >= 0"),
+    description: z.string().min(1, "Vui lòng nhập mô tả"),
+    quantity: z.coerce.number().int().min(1, "Số lượng tối thiểu 1"),
+    unitPrice: z.coerce.number().nonnegative("Đơn giá phải >= 0"),
     notes: z.string().optional(),
   })
   .refine(
-    (v) => v.type === PurchaseItemType.MACHINE || !!v.categoryCode,
+    (v) => v.itemType === PurchaseItemType.MACHINE || !!v.categoryCode,
     { message: "Vui lòng chọn loại linh kiện", path: ["categoryCode"] },
   );
 
 const schema = z.object({
-  supplierName: z.string().min(1, "Vui lòng nhập nhà cung cấp"),
+  supplierId: z.string().optional(),
+  otherCost: z.coerce.number().nonnegative("Chi phí khác phải >= 0").optional(),
   notes: z.string().optional(),
   items: z.array(itemSchema).min(1, "Cần ít nhất 1 mục"),
 });
@@ -66,14 +68,15 @@ export default function NewPurchasePage() {
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
-      supplierName: "",
+      supplierId: undefined,
+      otherCost: 0,
       notes: "",
       items: [
         {
-          type: PurchaseItemType.MACHINE,
-          purchasePrice: 0,
-          model: "",
-          serial: "",
+          itemType: PurchaseItemType.MACHINE,
+          description: "",
+          quantity: 1,
+          unitPrice: 0,
           notes: "",
         },
       ],
@@ -87,7 +90,21 @@ export default function NewPurchasePage() {
 
   const onSubmit = async (values: FormValues) => {
     try {
-      const result = await createMutation.mutateAsync(values);
+      const payload = {
+        supplierId: values.supplierId,
+        otherCost: values.otherCost,
+        notes: values.notes,
+        items: values.items.map((it) => ({
+          itemType: it.itemType,
+          description: it.description,
+          quantity: it.quantity,
+          unitPrice: it.unitPrice,
+          categoryCode:
+            it.itemType === PurchaseItemType.COMPONENT ? it.categoryCode : undefined,
+          notes: it.notes,
+        })),
+      };
+      const result = await createMutation.mutateAsync(payload);
       toast.success("Đã tạo phiếu mua (nháp)");
       router.push(`/purchases/${result.id}`);
     } catch (err: any) {
@@ -109,12 +126,28 @@ export default function NewPurchasePage() {
             <CardContent className="grid gap-4 p-4 sm:grid-cols-2">
               <FormField
                 control={form.control}
-                name="supplierName"
+                name="supplierId"
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Nhà cung cấp</FormLabel>
                     <FormControl>
-                      <Input placeholder="Tên nhà cung cấp" {...field} />
+                      <SupplierCombobox
+                        value={field.value}
+                        onChange={(id) => field.onChange(id)}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="otherCost"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Chi phí khác (VND)</FormLabel>
+                    <FormControl>
+                      <Input type="number" min={0} {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -146,10 +179,10 @@ export default function NewPurchasePage() {
                   size="sm"
                   onClick={() =>
                     append({
-                      type: PurchaseItemType.MACHINE,
-                      purchasePrice: 0,
-                      model: "",
-                      serial: "",
+                      itemType: PurchaseItemType.MACHINE,
+                      description: "",
+                      quantity: 1,
+                      unitPrice: 0,
                       notes: "",
                     })
                   }
@@ -159,7 +192,7 @@ export default function NewPurchasePage() {
                 </Button>
               </div>
               {fields.map((field, idx) => {
-                const itemType = form.watch(`items.${idx}.type`);
+                const itemType = form.watch(`items.${idx}.itemType`);
                 return (
                   <div
                     key={field.id}
@@ -167,7 +200,7 @@ export default function NewPurchasePage() {
                   >
                     <FormField
                       control={form.control}
-                      name={`items.${idx}.type`}
+                      name={`items.${idx}.itemType`}
                       render={({ field }) => (
                         <FormItem className="sm:col-span-2">
                           <FormLabel>Loại</FormLabel>
@@ -225,12 +258,18 @@ export default function NewPurchasePage() {
                     )}
                     <FormField
                       control={form.control}
-                      name={`items.${idx}.model`}
+                      name={`items.${idx}.description`}
                       render={({ field }) => (
-                        <FormItem className="sm:col-span-3">
-                          <FormLabel>Model</FormLabel>
+                        <FormItem
+                          className={
+                            itemType === PurchaseItemType.COMPONENT
+                              ? "sm:col-span-4"
+                              : "sm:col-span-6"
+                          }
+                        >
+                          <FormLabel>Mô tả</FormLabel>
                           <FormControl>
-                            <Input {...field} />
+                            <Input placeholder="VD: Dell Optiplex 7050" {...field} />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -238,25 +277,38 @@ export default function NewPurchasePage() {
                     />
                     <FormField
                       control={form.control}
-                      name={`items.${idx}.serial`}
-                      render={({ field }) => (
-                        <FormItem className="sm:col-span-3">
-                          <FormLabel>Serial</FormLabel>
-                          <FormControl>
-                            <Input {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name={`items.${idx}.purchasePrice`}
+                      name={`items.${idx}.quantity`}
                       render={({ field }) => (
                         <FormItem className="sm:col-span-2">
-                          <FormLabel>Giá mua (VND)</FormLabel>
+                          <FormLabel>Số lượng</FormLabel>
+                          <FormControl>
+                            <Input type="number" min={1} {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name={`items.${idx}.unitPrice`}
+                      render={({ field }) => (
+                        <FormItem className="sm:col-span-2">
+                          <FormLabel>Đơn giá (VND)</FormLabel>
                           <FormControl>
                             <Input type="number" min={0} {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name={`items.${idx}.notes`}
+                      render={({ field }) => (
+                        <FormItem className="sm:col-span-12">
+                          <FormLabel>Ghi chú</FormLabel>
+                          <FormControl>
+                            <Input {...field} />
                           </FormControl>
                           <FormMessage />
                         </FormItem>

@@ -18,127 +18,144 @@ const ROLES: Array<{ code: string; name: string; description: string }> = [
 ];
 
 // ----------------------------------------------------------------------------
-// Permissions (ARCHITECTURE.md section 9)
+// Permissions (canonical set — Phase 1 + Phase 2 seeded so RBAC checks pass)
 // ----------------------------------------------------------------------------
 const PERMISSIONS: string[] = [
+  "dashboard:view",
+
+  "user:view",
+  "user:create",
+  "user:update",
+  "user:delete",
+
+  "role:view",
+  "role:create",
+  "role:update",
+  "role:delete",
+
+  "supplier:view",
+  "supplier:create",
+  "supplier:update",
+  "supplier:delete",
+
+  "customer:view",
+  "customer:create",
+  "customer:update",
+  "customer:delete",
+
+  "purchase:view",
   "purchase:create",
   "purchase:update",
   "purchase:confirm",
   "purchase:cancel",
-  "purchase:view",
 
-  "machine:create",
-  "machine:inspect",
-  "machine:disassemble",
-  "machine:update",
   "machine:view",
+  "machine:inspect",
+  "machine:allocate_cost",
+  "machine:disassemble",
+  "machine:mark_ready",
 
-  "component:create",
-  "component:update",
-  "component:delete",
   "component:view",
+  "component:update",
+  "component:scrap",
 
-  "inventory:adjust",
   "inventory:view",
+  "inventory:adjust",
 
+  "assembly:view",
   "assembly:create",
   "assembly:update",
   "assembly:complete",
   "assembly:cancel",
-  "assembly:view",
 
-  "finished_pc:update",
   "finished_pc:view",
+  "finished_pc:update",
 
-  "sale:create",
-  "sale:update",
-  "sale:cancel",
-  "sale:refund",
   "sale:view",
+  "sale:create",
+  "sale:cancel",
 
+  "warranty:view",
   "warranty:create",
   "warranty:update",
-  "warranty:complete",
-  "warranty:view",
-
-  "customer:create",
-  "customer:update",
-  "customer:view",
-  "supplier:create",
-  "supplier:update",
-  "supplier:view",
 
   "report:view",
-  "report:export",
-
-  "user:create",
-  "user:update",
-  "user:delete",
-  "user:view",
-  "role:assign",
 
   "audit:view",
+
+  "setting:view",
   "setting:update",
 ];
 
 // ----------------------------------------------------------------------------
 // Role <-> permissions mapping
 // ----------------------------------------------------------------------------
+const VIEW_ONLY_PERMS = PERMISSIONS.filter((p) => p.endsWith(":view"));
+
 const ROLE_PERMISSIONS: Record<string, string[]> = {
-  // Admin gets everything (resolved at runtime).
+  // Admin gets everything (resolved at runtime via "*" wildcard in PermissionsGuard).
   ADMIN: ["*"],
 
   MANAGER: [
-    "purchase:create", "purchase:update", "purchase:confirm", "purchase:cancel", "purchase:view",
-    "machine:create", "machine:inspect", "machine:disassemble", "machine:update", "machine:view",
-    "component:create", "component:update", "component:view",
-    "inventory:adjust", "inventory:view",
-    "assembly:create", "assembly:update", "assembly:complete", "assembly:cancel", "assembly:view",
-    "finished_pc:update", "finished_pc:view",
-    "sale:create", "sale:update", "sale:cancel", "sale:refund", "sale:view",
-    "warranty:create", "warranty:update", "warranty:complete", "warranty:view",
-    "customer:create", "customer:update", "customer:view",
-    "supplier:create", "supplier:update", "supplier:view",
-    "report:view", "report:export",
+    "dashboard:view",
     "user:view",
+    "role:view",
+    "supplier:view", "supplier:create", "supplier:update",
+    "customer:view", "customer:create", "customer:update",
+    "purchase:view", "purchase:create", "purchase:update", "purchase:confirm", "purchase:cancel",
+    "machine:view", "machine:inspect", "machine:allocate_cost", "machine:disassemble", "machine:mark_ready",
+    "component:view", "component:update",
+    "inventory:view", "inventory:adjust",
+    "assembly:view", "assembly:create", "assembly:update", "assembly:complete", "assembly:cancel",
+    "finished_pc:view", "finished_pc:update",
+    "sale:view", "sale:create", "sale:cancel",
+    "warranty:view", "warranty:create", "warranty:update",
+    "report:view",
     "audit:view",
+    "setting:view",
   ],
 
   WAREHOUSE: [
-    "inventory:adjust", "inventory:view",
-    "component:create", "component:update", "component:view",
-    "machine:view", "finished_pc:view",
-    "supplier:view", "customer:view",
+    "dashboard:view",
+    "inventory:view", "inventory:adjust",
+    "component:view", "component:update", "component:scrap",
+    "machine:view",
+    "finished_pc:view",
+    "supplier:view",
+    "customer:view",
+    "purchase:view",
   ],
 
   TECHNICIAN: [
-    "machine:inspect", "machine:disassemble", "machine:update", "machine:view",
-    "component:create", "component:update", "component:view",
-    "assembly:create", "assembly:update", "assembly:complete", "assembly:view",
-    "finished_pc:update", "finished_pc:view",
+    "dashboard:view",
+    "machine:view", "machine:inspect", "machine:allocate_cost", "machine:disassemble", "machine:mark_ready",
+    "component:view", "component:update",
+    "assembly:view", "assembly:create", "assembly:update", "assembly:complete", "assembly:cancel",
+    "finished_pc:view", "finished_pc:update",
     "inventory:view",
   ],
 
   SALES: [
-    "sale:create", "sale:update", "sale:cancel", "sale:view",
-    "customer:create", "customer:update", "customer:view",
-    "finished_pc:view", "component:view", "inventory:view",
-    "warranty:create", "warranty:view",
+    "dashboard:view",
+    "customer:view", "customer:create", "customer:update",
+    "sale:view", "sale:create", "sale:cancel",
+    "warranty:view", "warranty:create", "warranty:update",
+    "finished_pc:view",
+    "component:view",
+    "inventory:view",
   ],
 
   ACCOUNTANT: [
-    "report:view", "report:export",
+    "dashboard:view",
+    "report:view",
+    "audit:view",
     "purchase:view", "sale:view", "warranty:view",
     "component:view", "machine:view", "finished_pc:view",
-    "inventory:view", "audit:view",
+    "inventory:view",
+    "supplier:view", "customer:view",
   ],
 
-  VIEWER: [
-    "purchase:view", "machine:view", "component:view",
-    "inventory:view", "assembly:view", "finished_pc:view",
-    "sale:view", "warranty:view", "report:view",
-    "customer:view", "supplier:view",
-  ],
+  VIEWER: VIEW_ONLY_PERMS,
 };
 
 // ----------------------------------------------------------------------------
@@ -162,7 +179,7 @@ const CATEGORIES: Array<{ code: string; name: string; prefix: string; sortOrder:
 async function main() {
   console.log("Seeding database...");
 
-  // 1. Permissions
+  // 1. Permissions — also prune any legacy codes that are no longer in the canonical set.
   for (const code of PERMISSIONS) {
     await prisma.permission.upsert({
       where: { code },
@@ -170,6 +187,7 @@ async function main() {
       update: {},
     });
   }
+  await prisma.permission.deleteMany({ where: { code: { notIn: PERMISSIONS } } });
   console.log(`  -> ${PERMISSIONS.length} permissions`);
 
   // 2. Roles

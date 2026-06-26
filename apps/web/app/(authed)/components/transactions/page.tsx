@@ -31,11 +31,11 @@ import { useStockTransactions } from "@/features/inventory/hooks";
 export default function StockTransactionsPage() {
   const [page, setPage] = React.useState(1);
   const [type, setType] = React.useState<StockTxnType | "ALL">("ALL");
-  const [from, setFrom] = React.useState("");
-  const [to, setTo] = React.useState("");
+  const [fromDate, setFromDate] = React.useState("");
+  const [toDate, setToDate] = React.useState("");
   const query = React.useMemo(
-    () => ({ page, pageSize: 20, type, from, to }),
-    [page, type, from, to],
+    () => ({ page, pageSize: 20, type, fromDate, toDate }),
+    [page, type, fromDate, toDate],
   );
   const { data, isLoading, isError } = useStockTransactions(query);
 
@@ -71,11 +71,11 @@ export default function StockTransactionsPage() {
           </div>
           <div>
             <label className="mb-1 block text-xs text-muted-foreground">Từ</label>
-            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+            <Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
           </div>
           <div>
             <label className="mb-1 block text-xs text-muted-foreground">Đến</label>
-            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+            <Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
           </div>
           <div className="flex items-end">
             <Button variant="secondary" className="w-full" onClick={() => setPage(1)}>

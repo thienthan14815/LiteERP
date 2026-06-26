@@ -46,12 +46,12 @@ export default function PurchasesListPage() {
   const [status, setStatus] = React.useState<PurchaseOrderStatus | "ALL">("ALL");
   const [search, setSearch] = React.useState("");
   const [searchDraft, setSearchDraft] = React.useState("");
-  const [from, setFrom] = React.useState("");
-  const [to, setTo] = React.useState("");
+  const [fromDate, setFromDate] = React.useState("");
+  const [toDate, setToDate] = React.useState("");
 
   const query = React.useMemo(
-    () => ({ page, pageSize, status, search, from, to }),
-    [page, pageSize, status, search, from, to],
+    () => ({ page, pageSize, status, search, fromDate, toDate }),
+    [page, pageSize, status, search, fromDate, toDate],
   );
 
   const { data, isLoading, isError } = usePurchases(query);
@@ -112,11 +112,11 @@ export default function PurchasesListPage() {
           </div>
           <div>
             <label className="mb-1 block text-xs text-muted-foreground">Từ ngày</label>
-            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+            <Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
           </div>
           <div>
             <label className="mb-1 block text-xs text-muted-foreground">Đến ngày</label>
-            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+            <Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
           </div>
           <div className="flex items-end">
             <Button variant="secondary" onClick={applySearch} className="w-full">

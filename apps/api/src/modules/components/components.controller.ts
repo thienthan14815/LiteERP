@@ -22,6 +22,6 @@ export class ComponentsController {
     return this.svc.update(id, dto);
   }
 
-  @Post(":id/scrap") @Permissions("component:update")
+  @Post(":id/scrap") @Permissions("component:scrap")
   scrap(@Param("id") id: string) { return this.svc.scrap(id); }
 }

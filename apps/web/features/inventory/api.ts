@@ -148,6 +148,7 @@ export interface ComponentDetail extends ComponentListItem {
   history?: Array<{
     finishedPcId: string;
     finishedPcCode: string;
+    finishedPcStatus?: string;
     installedAt: string;
     removedAt?: string | null;
   }>;
@@ -202,8 +203,8 @@ export interface StockTxnListQuery {
   pageSize?: number;
   type?: StockTxnType | "ALL";
   componentId?: string;
-  from?: string;
-  to?: string;
+  fromDate?: string;
+  toDate?: string;
 }
 
 export async function listStockTransactions(
@@ -211,7 +212,7 @@ export async function listStockTransactions(
 ): Promise<PaginatedResponse<StockTransaction>> {
   const params: Record<string, unknown> = { ...query };
   if (params.type === "ALL") delete params.type;
-  const { data } = await apiClient.get("/inventory/transactions", { params });
+  const { data } = await apiClient.get("/inventory/stock-transactions", { params });
   return unwrap<PaginatedResponse<StockTransaction>>(data);
 }
 
@@ -227,10 +228,12 @@ export async function getInventorySummary(): Promise<InventorySummary> {
 
 export interface InventoryValue {
   totalValue: number;
+  totalCount: number;
   byCategory: Array<{
     category: ComponentCategoryCode;
-    count: number;
+    name: string;
     value: number;
+    count: number;
   }>;
 }
 

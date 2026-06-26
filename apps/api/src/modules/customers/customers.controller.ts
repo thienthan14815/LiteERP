@@ -21,6 +21,6 @@ export class CustomersController {
   @Patch(":id") @Permissions("customer:update")
   update(@Param("id") id: string, @Body() dto: UpdateCustomerDto) { return this.svc.update(id, dto); }
 
-  @Delete(":id") @Permissions("customer:update")
+  @Delete(":id") @Permissions("customer:delete")
   remove(@Param("id") id: string) { return this.svc.remove(id); }
 }

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { HttpStatus, Injectable, NotFoundException } from "@nestjs/common";
 import { ComponentStatus, Prisma, StockTxnType } from "@prisma/client";
 import { PrismaService } from "../../database/prisma.service";
 import { AuditLogService } from "../audit-logs/audit-logs.service";
@@ -42,7 +42,12 @@ export class ComponentsService {
       }),
       this.prisma.component.count({ where }),
     ]);
-    return paginate(items, total, q.page ?? 1, q.pageSize ?? 20);
+    const projected = items.map((c) => ({
+      ...c,
+      serial: c.serialNumber,
+      categoryCode: c.category.code,
+    }));
+    return paginate(projected, total, q.page ?? 1, q.pageSize ?? 20);
   }
 
   async get(id: string) {
@@ -52,12 +57,29 @@ export class ComponentsService {
         category: true,
         sourceMachine: true,
         currentFinishedPc: true,
-        finishedPcLinks: { include: { finishedPc: true } },
+        finishedPcLinks: {
+          include: { finishedPc: { select: { id: true, code: true, status: true } } },
+          orderBy: { installedAt: "desc" },
+        },
         stockTransactions: { orderBy: { createdAt: "desc" } },
       },
     });
     if (!item) throw new NotFoundException({ code: "COMPONENT_NOT_FOUND", message: "Component not found" });
-    return item;
+
+    const { finishedPcLinks, category, ...rest } = item;
+    return {
+      ...rest,
+      serial: rest.serialNumber,
+      categoryCode: category.code,
+      category,
+      history: finishedPcLinks.map((link) => ({
+        finishedPcId: link.finishedPcId,
+        finishedPcCode: link.finishedPc.code,
+        finishedPcStatus: link.finishedPc.status,
+        installedAt: link.installedAt,
+        removedAt: link.removedAt,
+      })),
+    };
   }
 
   async getBySerial(serial: string) {
@@ -72,6 +94,21 @@ export class ComponentsService {
   async update(id: string, dto: UpdateComponentDto) {
     const before = await this.prisma.component.findUnique({ where: { id } });
     if (!before) throw new NotFoundException({ code: "COMPONENT_NOT_FOUND", message: "Component not found" });
+
+    if (dto.serialNumber && dto.serialNumber !== before.serialNumber) {
+      const dup = await this.prisma.component.findFirst({
+        where: { serialNumber: dto.serialNumber, NOT: { id } },
+        select: { id: true },
+      });
+      if (dup) {
+        throw new BusinessError(
+          "SERIAL_TAKEN",
+          `Serial ${dto.serialNumber} already in use`,
+          HttpStatus.CONFLICT,
+        );
+      }
+    }
+
     return this.prisma.$transaction(async (tx) => {
       const after = await tx.component.update({
         where: { id },
@@ -80,7 +117,6 @@ export class ComponentsService {
           location: dto.location ?? before.location,
           model: dto.model ?? before.model,
           serialNumber: dto.serialNumber ?? before.serialNumber,
-          costPrice: dto.costPrice ?? before.costPrice,
           notes: dto.notes ?? before.notes,
         },
       });
@@ -99,7 +135,7 @@ export class ComponentsService {
       throw new BusinessError(
         "INVALID_STATUS_TRANSITION",
         `Cannot scrap component in status ${before.status}`,
-        409 as any,
+        HttpStatus.CONFLICT,
       );
     }
     return this.prisma.$transaction(async (tx) => {
