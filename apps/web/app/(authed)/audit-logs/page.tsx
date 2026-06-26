@@ -18,8 +18,10 @@ import { DataPagination } from "@/components/tables/data-pagination";
 import { EmptyState } from "@/components/tables/empty-state";
 import { useAuditLogs } from "@/features/audit/hooks";
 import { formatDateTime } from "@/lib/utils";
+import { usePageMeta } from "@/lib/page-title-context";
 
 export default function AuditLogsPage() {
+  usePageMeta("Nhật ký hoạt động", "Lịch sử thao tác hệ thống");
   const [page, setPage] = React.useState(1);
   const [filters, setFilters] = React.useState({
     actorId: "",

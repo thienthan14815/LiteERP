@@ -32,6 +32,7 @@ import { PERM } from "@/lib/permissions";
 import { PURCHASE_ORDER_STATUS_LABEL } from "@/lib/labels";
 import { formatVnd, formatDate } from "@/lib/utils";
 import { usePurchases } from "@/features/purchase/hooks";
+import { usePageMeta } from "@/lib/page-title-context";
 
 const STATUS_OPTIONS: Array<{ value: PurchaseOrderStatus | "ALL"; label: string }> = [
   { value: "ALL", label: "Tất cả" },
@@ -41,6 +42,7 @@ const STATUS_OPTIONS: Array<{ value: PurchaseOrderStatus | "ALL"; label: string 
 ];
 
 export default function PurchasesListPage() {
+  usePageMeta("Mua hàng", "Quản lý phiếu mua từ nhà cung cấp");
   const [page, setPage] = React.useState(1);
   const [pageSize] = React.useState(20);
   const [status, setStatus] = React.useState<PurchaseOrderStatus | "ALL">("ALL");

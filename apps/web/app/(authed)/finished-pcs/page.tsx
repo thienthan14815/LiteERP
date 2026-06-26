@@ -29,6 +29,7 @@ import { DataPagination } from "@/components/tables/data-pagination";
 import { FINISHED_PC_STATUS_LABEL } from "@/lib/labels";
 import { formatVnd, formatDate } from "@/lib/utils";
 import { useFinishedPcs } from "@/features/finished-pc/hooks";
+import { usePageMeta } from "@/lib/page-title-context";
 
 const STATUS_OPTIONS: Array<{ value: FinishedPcStatus | "ALL"; label: string }> = [
   { value: "ALL", label: "Tất cả" },
@@ -39,6 +40,7 @@ const STATUS_OPTIONS: Array<{ value: FinishedPcStatus | "ALL"; label: string }> 
 ];
 
 export default function FinishedPcsListPage() {
+  usePageMeta("Máy thành phẩm", "PC sau lắp ráp");
   const [page, setPage] = React.useState(1);
   const [pageSize] = React.useState(20);
   const [status, setStatus] = React.useState<FinishedPcStatus | "ALL">("ALL");

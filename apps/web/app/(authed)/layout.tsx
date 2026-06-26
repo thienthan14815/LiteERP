@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/features/auth/use-auth";
 import { AppShell } from "@/components/layout/app-shell";
 import { Skeleton } from "@/components/ui/skeleton";
+import { PageTitleProvider } from "@/lib/page-title-context";
 
 export default function AuthedLayout({
   children,
@@ -28,5 +29,9 @@ export default function AuthedLayout({
 
   if (!isAuthenticated) return null;
 
-  return <AppShell>{children}</AppShell>;
+  return (
+    <PageTitleProvider>
+      <AppShell>{children}</AppShell>
+    </PageTitleProvider>
+  );
 }

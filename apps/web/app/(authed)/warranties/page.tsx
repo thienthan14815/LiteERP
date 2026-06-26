@@ -32,8 +32,10 @@ import { useWarranties } from "@/features/warranty/hooks";
 import { WARRANTY_STATUS_LABEL } from "@/lib/labels";
 import { formatDate } from "@/lib/utils";
 import { WarrantyStatus } from "@app/shared";
+import { usePageMeta } from "@/lib/page-title-context";
 
 export default function WarrantiesPage() {
+  usePageMeta("Bảo hành", "Yêu cầu bảo hành khách hàng");
   const [page, setPage] = React.useState(1);
   const [search, setSearch] = React.useState("");
   const [searchDraft, setSearchDraft] = React.useState("");

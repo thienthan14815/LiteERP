@@ -32,6 +32,7 @@ import { PERM } from "@/lib/permissions";
 import { SALES_ORDER_STATUS_LABEL } from "@/lib/labels";
 import { formatVnd, formatDate } from "@/lib/utils";
 import { useSales } from "@/features/sale/hooks";
+import { usePageMeta } from "@/lib/page-title-context";
 
 const STATUS_OPTIONS: Array<{ value: SalesOrderStatus | "ALL"; label: string }> = [
   { value: "ALL", label: "Tất cả" },
@@ -42,6 +43,7 @@ const STATUS_OPTIONS: Array<{ value: SalesOrderStatus | "ALL"; label: string }> 
 ];
 
 export default function SalesListPage() {
+  usePageMeta("Bán hàng", "Đơn hàng và doanh thu");
   const [page, setPage] = React.useState(1);
   const [pageSize] = React.useState(20);
   const [status, setStatus] = React.useState<SalesOrderStatus | "ALL">("ALL");

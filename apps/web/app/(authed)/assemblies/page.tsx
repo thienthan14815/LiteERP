@@ -32,6 +32,7 @@ import { PERM } from "@/lib/permissions";
 import { ASSEMBLY_STATUS_LABEL } from "@/lib/labels";
 import { formatVnd, formatDate } from "@/lib/utils";
 import { useAssemblies } from "@/features/assembly/hooks";
+import { usePageMeta } from "@/lib/page-title-context";
 
 const STATUS_OPTIONS: Array<{ value: AssemblyStatus | "ALL"; label: string }> = [
   { value: "ALL", label: "Tất cả" },
@@ -42,6 +43,7 @@ const STATUS_OPTIONS: Array<{ value: AssemblyStatus | "ALL"; label: string }> = 
 ];
 
 export default function AssembliesListPage() {
+  usePageMeta("Lắp ráp", "Phiếu lắp ráp PC mới");
   const [page, setPage] = React.useState(1);
   const [pageSize] = React.useState(20);
   const [status, setStatus] = React.useState<AssemblyStatus | "ALL">("ALL");

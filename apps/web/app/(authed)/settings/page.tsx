@@ -14,8 +14,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/features/auth/use-auth";
 import { isAdmin } from "@/lib/permissions";
+import { usePageMeta } from "@/lib/page-title-context";
 
 export default function SettingsPage() {
+  usePageMeta("Cài đặt", "Quản lý hệ thống");
   const { roles, isLoading } = useAuth();
   const router = useRouter();
 

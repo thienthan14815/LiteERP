@@ -14,7 +14,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="vi" suppressHydrationWarning>
-      <body className="min-h-screen bg-background text-foreground antialiased">
+      <body className="min-h-screen bg-slate-50 text-slate-900 antialiased font-sans">
         <I18nProvider>
           <QueryProvider>
             <AuthProvider>

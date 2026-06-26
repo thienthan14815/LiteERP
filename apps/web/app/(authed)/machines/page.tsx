@@ -29,6 +29,7 @@ import { DataPagination } from "@/components/tables/data-pagination";
 import { MACHINE_STATUS_LABEL } from "@/lib/labels";
 import { formatVnd, formatDate } from "@/lib/utils";
 import { useMachines } from "@/features/inventory/hooks";
+import { usePageMeta } from "@/lib/page-title-context";
 
 const STATUS_OPTS: Array<{ value: MachineStatus | "ALL"; label: string }> = [
   { value: "ALL", label: "Tất cả" },
@@ -39,6 +40,7 @@ const STATUS_OPTS: Array<{ value: MachineStatus | "ALL"; label: string }> = [
 ];
 
 export default function MachinesListPage() {
+  usePageMeta("Máy tính", "Quản lý máy cũ thu mua");
   const [page, setPage] = React.useState(1);
   const [status, setStatus] = React.useState<MachineStatus | "ALL">("ALL");
   const [search, setSearch] = React.useState("");

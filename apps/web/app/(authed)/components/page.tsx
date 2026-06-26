@@ -37,8 +37,10 @@ import {
 } from "@/lib/labels";
 import { formatVnd } from "@/lib/utils";
 import { useComponents } from "@/features/inventory/hooks";
+import { usePageMeta } from "@/lib/page-title-context";
 
 export default function ComponentsListPage() {
+  usePageMeta("Linh kiện", "Kho linh kiện trong hệ thống");
   const [page, setPage] = React.useState(1);
   const [search, setSearch] = React.useState("");
   const [searchDraft, setSearchDraft] = React.useState("");

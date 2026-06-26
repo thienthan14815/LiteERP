@@ -38,6 +38,7 @@ import {
   useTopCustomers,
 } from "@/features/reports/hooks";
 import { formatNumber, formatVnd, formatDate } from "@/lib/utils";
+import { usePageMeta } from "@/lib/page-title-context";
 
 function firstDayOfMonthISO() {
   const d = new Date();
@@ -51,6 +52,7 @@ function todayISO() {
 const PIE_COLORS = ["#2563eb", "#16a34a", "#f97316", "#dc2626", "#7c3aed", "#0ea5e9", "#facc15"];
 
 export default function ReportsPage() {
+  usePageMeta("Báo cáo", "Phân tích kinh doanh");
   const [fromDraft, setFromDraft] = React.useState(firstDayOfMonthISO());
   const [toDraft, setToDraft] = React.useState(todayISO());
   const [from, setFrom] = React.useState(fromDraft);
