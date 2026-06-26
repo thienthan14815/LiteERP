@@ -1,0 +1,36 @@
+{
+  "name": "computer-refurb-system",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Computer Refurbishment & Inventory Management System monorepo",
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "pnpm -r --parallel run dev",
+    "build": "pnpm -r run build",
+    "lint": "pnpm -r run lint",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test",
+    "dev:api": "pnpm --filter @app/api dev",
+    "dev:web": "pnpm --filter @app/web dev",
+    "prisma:generate": "pnpm --filter @app/api prisma:generate",
+    "prisma:migrate": "pnpm --filter @app/api prisma:migrate",
+    "prisma:seed": "pnpm --filter @app/api prisma:seed",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5",
+    "prettier": "^3.2.5",
+    "eslint": "^8.57.0",
+    "@types/node": "^20.12.7"
+  }
+}
