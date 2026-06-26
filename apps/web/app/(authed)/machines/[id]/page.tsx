@@ -48,6 +48,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/tables/status-badge";
 import { ConfirmDialog } from "@/components/dialogs/confirm-dialog";
+import { AttachmentUploader } from "@/components/forms/attachment-uploader";
 import { Can } from "@/features/auth/can";
 import { PERM } from "@/lib/permissions";
 import {
@@ -653,6 +654,15 @@ export default function MachineDetailPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <Card className="mt-4">
+        <CardHeader>
+          <CardTitle>Tệp đính kèm</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <AttachmentUploader relatedType="MACHINE" relatedId={machine.id} />
+        </CardContent>
+      </Card>
 
       <ConfirmDialog
         open={disOpen}

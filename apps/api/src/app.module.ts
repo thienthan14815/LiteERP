@@ -28,6 +28,8 @@ import { SalesModule } from "./modules/sales/sales.module";
 import { WarrantiesModule } from "./modules/warranties/warranties.module";
 import { ReportsModule } from "./modules/reports/reports.module";
 import { AuditLogsModule } from "./modules/audit-logs/audit-logs.module";
+import { AttachmentsModule } from "./modules/attachments/attachments.module";
+import { NotificationsModule } from "./modules/notifications/notifications.module";
 import { HealthModule } from "./modules/health/health.module";
 
 @Module({
@@ -53,6 +55,8 @@ import { HealthModule } from "./modules/health/health.module";
     SalesModule,
     WarrantiesModule,
     ReportsModule,
+    AttachmentsModule,
+    NotificationsModule,
     HealthModule,
   ],
   providers: [

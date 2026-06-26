@@ -102,6 +102,15 @@ export const COMPONENT_CONDITION_LABEL: Record<ComponentCondition, string> = {
   [ComponentCondition.LIQUIDATION]: "Thanh lý",
 };
 
+export const ATTACHMENT_LABEL = {
+  uploadBtn: "Tải lên",
+  dropHint: "Kéo thả tệp vào đây hoặc bấm để chọn",
+  uploading: "Đang tải lên...",
+  uploadFailed: "Tải lên thất bại",
+  deleteConfirm: "Xóa tệp đính kèm này?",
+  noFiles: "Chưa có tệp đính kèm",
+} as const;
+
 export const COMPONENT_CATEGORY_LABEL: Record<ComponentCategoryCode, string> = {
   [ComponentCategoryCode.CPU]: "CPU",
   [ComponentCategoryCode.MB]: "Mainboard",
