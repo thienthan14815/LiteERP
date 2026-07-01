@@ -6,6 +6,9 @@ import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { typedConfig } from "./config/configuration";
 import { PrismaModule } from "./database/prisma.module";
 import { QueueModule } from "./jobs/queue.module";
+import { RepositoryModule } from "./repository/repository.module";
+import { DriveModule } from "./modules/drive/drive.module";
+import { BackupModule } from "./modules/backup/backup.module";
 
 import { RequestContextModule } from "./common/context/request-context.module";
 import { CodeGeneratorModule } from "./common/utils/code-generator.module";
@@ -37,10 +40,13 @@ import { HealthModule } from "./modules/health/health.module";
     ConfigModule.forRoot({ isGlobal: true, load: [typedConfig] }),
     ThrottlerModule.forRoot([{ name: "default", ttl: 60_000, limit: 100 }]),
     PrismaModule,
+    RepositoryModule,
+    DriveModule,
     RequestContextModule,
     CodeGeneratorModule,
     QueueModule,
     AuditLogsModule,
+    BackupModule,
     InventoryModule,
     AuthModule,
     UsersModule,

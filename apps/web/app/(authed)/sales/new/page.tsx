@@ -48,9 +48,10 @@ export default function NewSalePage() {
     setRows((rs) => rs.map((r) => (r.uid === uid ? { ...r, ...patch } : r)));
 
   const totalRevenue = rows.reduce((s, r) => s + Number(r.unitPrice || 0), 0);
+  // Prisma Decimal → JSON string; phải Number() coerce trước khi cộng.
   const totalCost = rows.reduce((s, r) => {
-    if (r.itemType === SalesItemType.FINISHED_PC) return s + (r.finishedPc?.costPrice ?? 0);
-    if (r.itemType === SalesItemType.COMPONENT) return s + (r.component?.costPrice ?? 0);
+    if (r.itemType === SalesItemType.FINISHED_PC) return s + Number(r.finishedPc?.costPrice ?? 0);
+    if (r.itemType === SalesItemType.COMPONENT) return s + Number(r.component?.costPrice ?? 0);
     return s;
   }, 0);
   const estProfit = totalRevenue - totalCost;
@@ -171,7 +172,7 @@ export default function NewSalePage() {
                 )}
               </div>
               <div className="sm:col-span-2">
-                <Label>Đơn giá (VND)</Label>
+                <Label>Đơn giá (TWD)</Label>
                 <Input
                   type="number"
                   min={0}

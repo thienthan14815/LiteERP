@@ -29,10 +29,18 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   searchSuppliers,
   createSupplier,
   type SupplierOption,
   type CreateSupplierInput,
+  type SupplierCategory,
 } from "./api";
 
 interface SupplierComboboxProps {
@@ -95,7 +103,7 @@ export function SupplierCombobox({ value, onChange }: SupplierComboboxProps) {
         <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
           <Command shouldFilter={false}>
             <CommandInput
-              placeholder="Tìm theo tên / SĐT..."
+              placeholder="Tìm theo tên / mã..."
               value={query}
               onValueChange={setQuery}
             />
@@ -173,12 +181,17 @@ function CreateSupplierDialog({
   onSubmit,
 }: CreateSupplierDialogProps) {
   const [name, setName] = React.useState(initialName ?? "");
-  const [phone, setPhone] = React.useState("");
-  const [email, setEmail] = React.useState("");
-  const [address, setAddress] = React.useState("");
+  const [fbUrl, setFbUrl] = React.useState("");
+  const [marketplaceUrl, setMarketplaceUrl] = React.useState("");
+  const [category, setCategory] = React.useState<SupplierCategory | "">("");
 
   React.useEffect(() => {
-    if (open) setName(initialName ?? "");
+    if (open) {
+      setName(initialName ?? "");
+      setFbUrl("");
+      setMarketplaceUrl("");
+      setCategory("");
+    }
   }, [open, initialName]);
 
   const submit = () => {
@@ -186,11 +199,17 @@ function CreateSupplierDialog({
       toast.error("Vui lòng nhập tên nhà cung cấp");
       return;
     }
+    // Cho phép nhập cả link không có scheme — thêm https:// nếu thiếu để pass @IsUrl.
+    const normalize = (s: string) => {
+      const t = s.trim();
+      if (!t) return undefined;
+      return /^https?:\/\//i.test(t) ? t : `https://${t}`;
+    };
     onSubmit({
       name: name.trim(),
-      phone: phone.trim() || undefined,
-      email: email.trim() || undefined,
-      address: address.trim() || undefined,
+      fbUrl: normalize(fbUrl),
+      marketplaceUrl: normalize(marketplaceUrl),
+      category: category || undefined,
     });
   };
 
@@ -206,16 +225,32 @@ function CreateSupplierDialog({
             <Input id="sup-name" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div>
-            <Label htmlFor="sup-phone">Số điện thoại</Label>
-            <Input id="sup-phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
+            <Label htmlFor="sup-fb">FB URL</Label>
+            <Input
+              id="sup-fb"
+              placeholder="https://facebook.com/..."
+              value={fbUrl}
+              onChange={(e) => setFbUrl(e.target.value)}
+            />
           </div>
           <div>
-            <Label htmlFor="sup-email">Email</Label>
-            <Input id="sup-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <Label htmlFor="sup-mp">Marketplace Product URL</Label>
+            <Input
+              id="sup-mp"
+              placeholder="https://shopee.tw/... hoặc https://ebay..."
+              value={marketplaceUrl}
+              onChange={(e) => setMarketplaceUrl(e.target.value)}
+            />
           </div>
           <div>
-            <Label htmlFor="sup-address">Địa chỉ</Label>
-            <Input id="sup-address" value={address} onChange={(e) => setAddress(e.target.value)} />
+            <Label htmlFor="sup-cat">Thể loại</Label>
+            <Select value={category} onValueChange={(v) => setCategory(v as SupplierCategory)}>
+              <SelectTrigger id="sup-cat"><SelectValue placeholder="Chọn thể loại..." /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="WHOLESALE">Bán buôn</SelectItem>
+                <SelectItem value="RETAIL">Bán lẻ</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
         <DialogFooter>

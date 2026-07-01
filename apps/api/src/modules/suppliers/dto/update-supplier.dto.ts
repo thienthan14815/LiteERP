@@ -1,10 +1,10 @@
-import { IsEmail, IsOptional, IsString, MaxLength } from "class-validator";
+import { IsEnum, IsOptional, IsString, IsUrl, MaxLength } from "class-validator";
+import { SupplierCategory } from "@prisma/client";
 
 export class UpdateSupplierDto {
   @IsOptional() @IsString() @MaxLength(255) name?: string;
-  @IsOptional() @IsString() @MaxLength(32) phone?: string;
-  @IsOptional() @IsEmail() email?: string;
-  @IsOptional() @IsString() @MaxLength(512) address?: string;
-  @IsOptional() @IsString() @MaxLength(64) taxCode?: string;
+  @IsOptional() @IsUrl({ require_tld: false }) @MaxLength(512) fbUrl?: string;
+  @IsOptional() @IsUrl({ require_tld: false }) @MaxLength(512) marketplaceUrl?: string;
+  @IsOptional() @IsEnum(SupplierCategory) category?: SupplierCategory;
   @IsOptional() @IsString() notes?: string;
 }

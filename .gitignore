@@ -47,3 +47,15 @@ docker/volumes/
 uploads/
 tmp/
 pnpm-lock.yaml
+
+# Capacitor / Android
+android/.gradle/
+android/.idea/
+android/local.properties
+android/app/build/
+android/build/
+android/captures/
+android/app/release/
+*.keystore
+*.jks
+keystore.properties

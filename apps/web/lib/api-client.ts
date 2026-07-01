@@ -49,6 +49,16 @@ apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  // Strip params có value "" / null / undefined trước khi serialize thành query.
+  // Backend dùng `forbidNonWhitelisted: true` + `@IsISO8601()` → nhận empty
+  // string sẽ trả 400 (case /purchases?fromDate=&toDate=).
+  if (config.params && typeof config.params === "object") {
+    const cleaned: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(config.params)) {
+      if (v !== "" && v !== null && v !== undefined) cleaned[k] = v;
+    }
+    config.params = cleaned;
+  }
   return config;
 });
 
@@ -93,8 +103,9 @@ apiClient.interceptors.response.use(
         const { data } = await axios.post(`${API_BASE_URL}/auth/refresh`, {
           refreshToken: refresh,
         });
-        const access = data?.data?.accessToken;
-        const newRefresh = data?.data?.refreshToken;
+        const payload = data?.data ?? data;
+        const access = payload?.accessToken;
+        const newRefresh = payload?.refreshToken;
         if (access && newRefresh) {
           setTokens(access, newRefresh);
           flushQueue(access);

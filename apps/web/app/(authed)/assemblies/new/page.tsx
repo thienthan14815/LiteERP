@@ -29,6 +29,7 @@ interface Row {
   uid: string;
   component: ComponentOption | null;
   role: AssemblyRole;
+  qty: number;
 }
 
 const ROLE_LABEL: Record<AssemblyRole, string> = {
@@ -69,15 +70,17 @@ export default function NewAssemblyPage() {
   const [cleaningCost, setCleaningCost] = React.useState<number | "">(0);
   const [assemblyCost, setAssemblyCost] = React.useState<number | "">(0);
   const [rows, setRows] = React.useState<Row[]>([
-    { uid: newUid(), component: null, role: AssemblyRole.CPU },
+    { uid: newUid(), component: null, role: AssemblyRole.CPU, qty: 1 },
   ]);
 
   const selectedIds = rows
     .map((r) => r.component?.id)
     .filter((x): x is string => !!x);
 
+  // Prisma Decimal serialize thành string qua JSON → phải Number() coerce
+  // trước khi cộng, tránh string-concat gây "12.000.001.500.000.000".
   const componentsTotal = rows.reduce(
-    (s, r) => s + (r.component?.costPrice ?? 0),
+    (s, r) => s + Number(r.component?.costPrice ?? 0) * (r.qty || 1),
     0,
   );
   const total =
@@ -89,7 +92,7 @@ export default function NewAssemblyPage() {
   const addRow = () => {
     setRows((rs) => [
       ...rs,
-      { uid: newUid(), component: null, role: AssemblyRole.OTHER },
+      { uid: newUid(), component: null, role: AssemblyRole.OTHER, qty: 1 },
     ]);
   };
   const removeRow = (uid: string) =>
@@ -117,6 +120,16 @@ export default function NewAssemblyPage() {
       toast.error("Cần ít nhất 1 linh kiện");
       return;
     }
+    // Mỗi linh kiện là 1 đơn vị vật lý (schema unique [assemblyOrderId, componentId]).
+    // Nếu user đặt qty > 1 nghĩa là muốn dùng nhiều linh kiện cùng model —
+    // cần thêm dòng khác chọn linh kiện khác.
+    const hasQtyOver1 = rows.some((r) => r.component && r.qty > 1);
+    if (hasQtyOver1) {
+      toast.error(
+        "Mỗi linh kiện chỉ dùng được 1 lần. Với SL > 1, hãy thêm dòng và chọn linh kiện khác cùng loại.",
+      );
+      return;
+    }
     try {
       const result = await createMut.mutateAsync({
         name: name.trim() || undefined,
@@ -126,7 +139,13 @@ export default function NewAssemblyPage() {
         assemblyCost: Number(assemblyCost || 0),
         items,
       });
-      toast.success("Đã tạo phiếu lắp ráp (nháp)");
+      toast.success("Đã lưu phiếu lắp ráp (nháp)", {
+        description: "Xem trong danh sách phiếu nháp",
+        action: {
+          label: "Xem danh sách",
+          onClick: () => router.push("/assemblies?status=DRAFT"),
+        },
+      });
       router.push(`/assemblies/${result.id}`);
     } catch (err: any) {
       toast.error(
@@ -167,58 +186,83 @@ export default function NewAssemblyPage() {
               <Plus className="mr-2 h-4 w-4" /> Thêm linh kiện
             </Button>
           </div>
-          {rows.map((row) => (
-            <div
-              key={row.uid}
-              className="grid gap-3 rounded-md border p-3 sm:grid-cols-12"
-            >
-              <div className="sm:col-span-7">
-                <Label>Linh kiện</Label>
-                <ComponentPicker
-                  value={row.component}
-                  excludeIds={selectedIds.filter((id) => id !== row.component?.id)}
-                  onChange={(c) => updateRow(row.uid, { component: c })}
-                />
+          {rows.map((row) => {
+            const unitPrice = Number(row.component?.costPrice ?? 0);
+            const rowCost = unitPrice * (row.qty || 1);
+            return (
+              <div
+                key={row.uid}
+                className="grid gap-3 rounded-md border p-3 sm:grid-cols-12"
+              >
+                <div className="sm:col-span-5">
+                  <Label>Linh kiện</Label>
+                  <ComponentPicker
+                    value={row.component}
+                    excludeIds={selectedIds.filter((id) => id !== row.component?.id)}
+                    onChange={(c) => updateRow(row.uid, { component: c })}
+                  />
+                </div>
+                <div className="sm:col-span-3">
+                  <Label>Vai trò</Label>
+                  <Select
+                    value={row.role}
+                    onValueChange={(v) =>
+                      updateRow(row.uid, { role: v as AssemblyRole })
+                    }
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {Object.values(AssemblyRole).map((r) => (
+                        <SelectItem key={r} value={r}>{ROLE_LABEL[r]}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="sm:col-span-1">
+                  <Label>SL</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={row.qty}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      updateRow(row.uid, { qty: v > 0 ? v : 1 });
+                    }}
+                  />
+                </div>
+                <div className="sm:col-span-3 flex items-end justify-between">
+                  <div className="text-right text-sm">
+                    {row.component ? (
+                      <>
+                        <div className="text-muted-foreground">{formatVnd(unitPrice)}</div>
+                        {row.qty > 1 && (
+                          <div className="font-medium">= {formatVnd(rowCost)}</div>
+                        )}
+                      </>
+                    ) : (
+                      "-"
+                    )}
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => removeRow(row.uid)}
+                    disabled={rows.length === 1}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
-              <div className="sm:col-span-3">
-                <Label>Vai trò</Label>
-                <Select
-                  value={row.role}
-                  onValueChange={(v) =>
-                    updateRow(row.uid, { role: v as AssemblyRole })
-                  }
-                >
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {Object.values(AssemblyRole).map((r) => (
-                      <SelectItem key={r} value={r}>{ROLE_LABEL[r]}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="sm:col-span-2 flex items-end justify-between">
-                <span className="text-sm">
-                  {row.component ? formatVnd(row.component.costPrice) : "-"}
-                </span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => removeRow(row.uid)}
-                  disabled={rows.length === 1}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </CardContent>
       </Card>
 
       <Card className="mb-4">
         <CardContent className="grid gap-4 p-4 sm:grid-cols-3">
           <div>
-            <Label>Chi phí sửa (VND)</Label>
+            <Label>Chi phí sửa (TWD)</Label>
             <Input
               type="number"
               min={0}
@@ -229,7 +273,7 @@ export default function NewAssemblyPage() {
             />
           </div>
           <div>
-            <Label>Chi phí vệ sinh (VND)</Label>
+            <Label>Chi phí vệ sinh (TWD)</Label>
             <Input
               type="number"
               min={0}
@@ -240,7 +284,7 @@ export default function NewAssemblyPage() {
             />
           </div>
           <div>
-            <Label>Chi phí lắp ráp (VND)</Label>
+            <Label>Chi phí lắp ráp (TWD)</Label>
             <Input
               type="number"
               min={0}

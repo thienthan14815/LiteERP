@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Plus } from "lucide-react";
 import { AssemblyStatus } from "@app/shared";
 import { PageHeader } from "@/components/layout/page-header";
@@ -44,9 +45,17 @@ const STATUS_OPTIONS: Array<{ value: AssemblyStatus | "ALL"; label: string }> = 
 
 export default function AssembliesListPage() {
   usePageMeta("Lắp ráp", "Phiếu lắp ráp PC mới");
+  const searchParams = useSearchParams();
+  const initialStatus = React.useMemo<AssemblyStatus | "ALL">(() => {
+    const q = searchParams?.get("status");
+    if (q && (Object.values(AssemblyStatus) as string[]).includes(q)) {
+      return q as AssemblyStatus;
+    }
+    return "ALL";
+  }, [searchParams]);
   const [page, setPage] = React.useState(1);
   const [pageSize] = React.useState(20);
-  const [status, setStatus] = React.useState<AssemblyStatus | "ALL">("ALL");
+  const [status, setStatus] = React.useState<AssemblyStatus | "ALL">(initialStatus);
   const [search, setSearch] = React.useState("");
   const [searchDraft, setSearchDraft] = React.useState("");
   const [fromDate, setFromDate] = React.useState("");

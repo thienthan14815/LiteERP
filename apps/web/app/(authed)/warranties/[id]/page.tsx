@@ -135,7 +135,7 @@ export default function WarrantyDetailPage() {
           <Card className="mt-4">
             <CardContent className="p-4">
               <h3 className="mb-3 text-sm font-semibold">Lịch sử trạng thái</h3>
-              {w.timeline.length === 0 ? (
+              {!w.timeline || w.timeline.length === 0 ? (
                 <p className="text-sm text-muted-foreground">Chưa có sự kiện</p>
               ) : (
                 <ul className="space-y-2">
@@ -160,7 +160,7 @@ export default function WarrantyDetailPage() {
                   <Button onClick={() => setReplaceOpen(true)} size="sm">Thay linh kiện</Button>
                 )}
               </div>
-              {w.items.length === 0 ? (
+              {!w.items || w.items.length === 0 ? (
                 <p className="text-sm text-muted-foreground">Chưa có thay thế</p>
               ) : (
                 <Table>

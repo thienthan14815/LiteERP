@@ -37,6 +37,7 @@ import {
 } from "@/lib/labels";
 import { useCreatePurchase } from "@/features/purchase/hooks";
 import { SupplierCombobox } from "@/features/purchase/supplier-combobox";
+import { formatVnd } from "@/lib/utils";
 
 const itemSchema = z
   .object({
@@ -145,7 +146,7 @@ export default function NewPurchasePage() {
                 name="otherCost"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Chi phí khác (VND)</FormLabel>
+                    <FormLabel>Chi phí khác (TWD)</FormLabel>
                     <FormControl>
                       <Input type="number" min={0} {...field} />
                     </FormControl>
@@ -263,8 +264,8 @@ export default function NewPurchasePage() {
                         <FormItem
                           className={
                             itemType === PurchaseItemType.COMPONENT
-                              ? "sm:col-span-4"
-                              : "sm:col-span-6"
+                              ? "sm:col-span-3"
+                              : "sm:col-span-5"
                           }
                         >
                           <FormLabel>Mô tả</FormLabel>
@@ -279,8 +280,8 @@ export default function NewPurchasePage() {
                       control={form.control}
                       name={`items.${idx}.quantity`}
                       render={({ field }) => (
-                        <FormItem className="sm:col-span-2">
-                          <FormLabel>Số lượng</FormLabel>
+                        <FormItem className="sm:col-span-1">
+                          <FormLabel>SL</FormLabel>
                           <FormControl>
                             <Input type="number" min={1} {...field} />
                           </FormControl>
@@ -293,7 +294,7 @@ export default function NewPurchasePage() {
                       name={`items.${idx}.unitPrice`}
                       render={({ field }) => (
                         <FormItem className="sm:col-span-2">
-                          <FormLabel>Đơn giá (VND)</FormLabel>
+                          <FormLabel>Đơn giá (TWD)</FormLabel>
                           <FormControl>
                             <Input type="number" min={0} {...field} />
                           </FormControl>
@@ -301,6 +302,16 @@ export default function NewPurchasePage() {
                         </FormItem>
                       )}
                     />
+                    {/* Thành tiền — readonly, tính theo SL × đơn giá */}
+                    <FormItem className="sm:col-span-2">
+                      <FormLabel>Thành tiền</FormLabel>
+                      <div className="flex h-10 items-center justify-end rounded-md border bg-muted px-3 text-sm font-medium">
+                        {formatVnd(
+                          (Number(form.watch(`items.${idx}.quantity`)) || 0) *
+                            (Number(form.watch(`items.${idx}.unitPrice`)) || 0),
+                        )}
+                      </div>
+                    </FormItem>
                     <FormField
                       control={form.control}
                       name={`items.${idx}.notes`}

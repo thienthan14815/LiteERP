@@ -1,0 +1,111 @@
+name: Build APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: "debug | release"
+        required: true
+        default: "release"
+        type: choice
+        options:
+          - debug
+          - release
+  push:
+    branches:
+      - dev
+      - main
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    env:
+      LITEERP_WEB_URL: ${{ vars.LITEERP_WEB_URL || 'http://192.168.101.170:3000' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Enable Corepack + pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@9.0.0 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Sync Capacitor
+        run: pnpm cap sync android
+
+      - name: Make Gradle executable
+        run: chmod +x android/gradlew
+
+      # ---- Debug branch ----------------------------------------------------
+      - name: Build Debug APK
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_type == 'debug' }}
+        run: cd android && ./gradlew assembleDebug --no-daemon
+
+      - name: Upload Debug APK
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_type == 'debug' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: liteerp-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      # ---- Release branch --------------------------------------------------
+      # Cần các GitHub secrets:
+      #   ANDROID_KEYSTORE_BASE64   = base64 của liteerp-release.keystore
+      #   ANDROID_KEYSTORE_PASSWORD
+      #   ANDROID_KEY_ALIAS
+      #   ANDROID_KEY_PASSWORD
+      - name: Decode keystore
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_type == 'release' }}
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::Missing secret ANDROID_KEYSTORE_BASE64"; exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > liteerp-release.keystore
+
+      - name: Write keystore.properties
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_type == 'release' }}
+        env:
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          cat > android/keystore.properties <<EOF
+          storeFile=../../liteerp-release.keystore
+          storePassword=$STORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          EOF
+
+      - name: Build Release APK
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_type == 'release' }}
+        run: cd android && ./gradlew assembleRelease --no-daemon
+
+      - name: Upload Release APK
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_type == 'release' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: liteerp-release-apk
+          path: android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error

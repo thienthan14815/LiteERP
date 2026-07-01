@@ -7,11 +7,10 @@ import { Loader2, Paperclip, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/dialogs/confirm-dialog";
 import {
-  confirmUpload,
-  createUploadUrl,
   deleteAttachment,
   downloadUrl,
   listAttachments,
+  uploadToDrive,
   type Attachment,
 } from "@/features/attachment/api";
 import { ATTACHMENT_LABEL } from "@/lib/labels";
@@ -44,24 +43,15 @@ export function AttachmentUploader({ relatedType, relatedId, onUploaded, readonl
   const upload = async (file: File) => {
     setUploading(true);
     try {
-      const presign = await createUploadUrl({
-        fileName: file.name,
-        mimeType: file.type || "application/octet-stream",
-        relatedType,
-        relatedId,
-      });
-      const res = await fetch(presign.uploadUrl, {
-        method: "PUT",
-        headers: { "Content-Type": file.type || "application/octet-stream" },
-        body: file,
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const confirmed = await confirmUpload(presign.attachmentId, file.size);
+      // Dùng flow Drive 1-bước (multipart) — thay S3 3-bước cũ.
+      const uploaded = await uploadToDrive({ file, relatedType, relatedId });
       toast.success(`Đã tải lên: ${file.name}`);
-      onUploaded?.(confirmed);
+      onUploaded?.(uploaded);
       qc.invalidateQueries({ queryKey: ["attachments", relatedType, relatedId] });
     } catch (err: any) {
-      toast.error(`${ATTACHMENT_LABEL.uploadFailed}: ${err?.message ?? "lỗi"}`);
+      const msg =
+        err?.response?.data?.error?.message ?? err?.message ?? "lỗi";
+      toast.error(`${ATTACHMENT_LABEL.uploadFailed}: ${msg}`);
     } finally {
       setUploading(false);
     }
@@ -72,9 +62,15 @@ export function AttachmentUploader({ relatedType, relatedId, onUploaded, readonl
     for (const f of Array.from(files)) await upload(f);
   };
 
-  const open = async (id: string) => {
+  const open = async (a: Attachment) => {
+    // File Drive: dùng thẳng previewUrl (backend không cần sinh signed URL nữa).
+    if (a.previewUrl) {
+      window.open(a.previewUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
+    // File legacy S3: fallback endpoint cũ.
     try {
-      const r = await downloadUrl(id);
+      const r = await downloadUrl(a.id);
       window.open(r.url, "_blank", "noopener,noreferrer");
     } catch (err: any) {
       toast.error("Không tải được liên kết");
@@ -122,7 +118,7 @@ export function AttachmentUploader({ relatedType, relatedId, onUploaded, readonl
         <ul className="divide-y rounded-md border">
           {data.map((a) => (
             <li key={a.id} className="flex items-center justify-between gap-2 p-2 text-sm">
-              <button onClick={() => open(a.id)} className="flex items-center gap-2 hover:underline">
+              <button onClick={() => open(a)} className="flex items-center gap-2 hover:underline">
                 <Paperclip className="h-4 w-4" />
                 <span>{a.fileName}</span>
                 <span className="text-xs text-muted-foreground">({a.fileType})</span>

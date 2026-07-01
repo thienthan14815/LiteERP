@@ -25,12 +25,26 @@
     "prisma:seed": "pnpm --filter @app/api prisma:seed",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
-    "docker:logs": "docker compose logs -f"
+    "docker:logs": "docker compose logs -f",
+    "cap:sync": "cap sync android",
+    "cap:open": "cap open android",
+    "android:build:debug": "cd android && ./gradlew assembleDebug",
+    "android:build:release": "cd android && ./gradlew assembleRelease",
+    "android:install:debug": "cd android && ./gradlew installDebug"
   },
   "devDependencies": {
-    "typescript": "^5.4.5",
-    "prettier": "^3.2.5",
+    "@capacitor/cli": "^6.1.2",
+    "@types/node": "^20.12.7",
     "eslint": "^8.57.0",
-    "@types/node": "^20.12.7"
+    "prettier": "^3.2.5",
+    "typescript": "^5.4.5"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/app": "^6.0.1",
+    "@capacitor/core": "^6.1.2",
+    "@capacitor/network": "^6.0.3",
+    "@capacitor/splash-screen": "^6.0.2",
+    "@capacitor/status-bar": "^6.0.2"
   }
 }

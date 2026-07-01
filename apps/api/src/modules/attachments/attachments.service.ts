@@ -12,11 +12,23 @@ import { RequestContextService } from "../../common/context/request-context.serv
 import { AuditLogService } from "../audit-logs/audit-logs.service";
 import { BusinessError } from "../../common/exceptions/business.exception";
 import type { AppConfig } from "../../config/configuration";
+import { AttachmentRepository } from "../../repository/attachment.repository";
+import { DriveService } from "../drive/drive.service";
+import { DriveFolder } from "../drive/drive-folder.enum";
 import {
   ConfirmUploadDto,
   CreateUploadUrlDto,
 } from "./dto/create-upload-url.dto";
+import { UploadDriveDto } from "./dto/upload-drive.dto";
+import type { AttachmentResponse } from "./dto/attachment.response";
 
+// VN: AttachmentsService = Service Layer. Business logic ở đây:
+//  - Kiểm tra entity tồn tại (stub, cần bổ sung ở phase sau)
+//  - Mở transaction bao trọn upload + audit
+//  - Gọi DriveService để đẩy binary lên Drive
+//  - Gọi AttachmentRepository để lưu metadata (KHÔNG dùng prisma trực tiếp
+//    cho các bảng nghiệp vụ; hai method legacy S3 giữ nguyên vì đang chạy).
+//  - Chuẩn hoá response DTO (KHÔNG lộ driveFileId ra frontend).
 const UPLOAD_URL_TTL = 60 * 10; // 10 min
 const DOWNLOAD_URL_TTL = 60 * 5; // 5 min
 
@@ -31,6 +43,8 @@ export class AttachmentsService {
     private readonly audit: AuditLogService,
     private readonly ctx: RequestContextService,
     private readonly config: ConfigService<AppConfig, true>,
+    private readonly repo: AttachmentRepository,
+    private readonly drive: DriveService,
   ) {
     const s3 = this.config.get("s3", { infer: true }) as AppConfig["s3"];
     this.bucket = s3.bucket;
@@ -50,6 +64,128 @@ export class AttachmentsService {
     return `${relatedType.toLowerCase()}/${relatedId}/${ts}-${safeName}`;
   }
 
+  // ---------------------------------------------------------------------------
+  // NEW: Drive-backed upload (multipart/form-data)
+  // ---------------------------------------------------------------------------
+  async uploadToDrive(
+    file: Express.Multer.File | undefined,
+    dto: UploadDriveDto,
+  ): Promise<AttachmentResponse> {
+    if (!file) {
+      throw new BusinessError(
+        "FILE_REQUIRED",
+        "Multipart field 'file' is required",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    // VN: TODO(phase2) — validate entity tồn tại theo entityType. Hiện tại
+    // chỉ chấp nhận mọi string; sẽ thay bằng lookup qua repository tương ứng
+    // (MachineRepository, SalesOrderRepository, ...) khi các repository đó ra đời.
+    if (!dto.entityType || !dto.entityId) {
+      throw new BusinessError(
+        "ENTITY_REQUIRED",
+        "entityType and entityId are required",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    // 1) Upload binary lên Drive TRƯỚC transaction — Drive không rollback được.
+    //    Nếu bước sau (DB write) fail, ta chủ động xoá file trên Drive để tránh
+    //    orphan (best-effort). Không đặt upload trong tx vì tx SQL không nên
+    //    ôm network call dài.
+    const uploaded = await this.drive.uploadFile(
+      file.buffer,
+      file.originalname,
+      file.mimetype,
+      dto.folder,
+    );
+
+    try {
+      const row = await this.prisma.$transaction(async (tx) => {
+        const created = await this.repo.create(
+          {
+            fileName: file.originalname,
+            fileUrl: uploaded.driveFileId, // giữ cột legacy — chứa drive id để backward-compat
+            fileType: inferFileType(file.mimetype),
+            mimeType: file.mimetype,
+            size: uploaded.sizeBytes,
+            relatedType: dto.entityType,
+            relatedId: dto.entityId,
+            driveFileId: uploaded.driveFileId,
+            createdById: this.ctx.getUserId() ?? null,
+          },
+          tx,
+        );
+        await this.audit.record(
+          {
+            action: "attachment.upload",
+            entityType: "Attachment",
+            entityId: created.id,
+            after: {
+              relatedType: dto.entityType,
+              relatedId: dto.entityId,
+              folder: dto.folder,
+              sizeBytes: uploaded.sizeBytes,
+            },
+          },
+          tx,
+        );
+        return created;
+      });
+      return this.toResponse(row, uploaded.thumbnailUrl, uploaded.previewUrl);
+    } catch (err) {
+      // Rollback Drive to avoid orphan.
+      this.logger.warn(
+        `DB write failed after Drive upload — attempting Drive cleanup for ${uploaded.driveFileId}`,
+      );
+      try {
+        await this.drive.deleteFile(uploaded.driveFileId);
+      } catch (cleanupErr) {
+        this.logger.error(
+          `Failed to cleanup Drive file ${uploaded.driveFileId}: ${(cleanupErr as Error).message}`,
+        );
+      }
+      throw err;
+    }
+  }
+
+  private toResponse(
+    row: {
+      id: string;
+      relatedType: string;
+      relatedId: string;
+      fileName: string;
+      mimeType: string;
+      size: number;
+      driveFileId: string | null;
+      createdAt: Date;
+    },
+    thumbnailUrlHint?: string,
+    previewUrlHint?: string,
+  ): AttachmentResponse {
+    let thumbnailUrl: string | null = null;
+    let previewUrl: string | null = null;
+    if (row.driveFileId) {
+      thumbnailUrl = thumbnailUrlHint ?? this.drive.getThumbnailUrl(row.driveFileId);
+      previewUrl = previewUrlHint ?? this.drive.getPreviewUrl(row.driveFileId);
+    }
+    return {
+      id: row.id,
+      entityType: row.relatedType,
+      entityId: row.relatedId,
+      filename: row.fileName,
+      mimeType: row.mimeType,
+      sizeBytes: row.size,
+      thumbnailUrl,
+      previewUrl,
+      createdAt: row.createdAt,
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Legacy S3/MinIO flow — refactor để dùng AttachmentRepository thay vì Prisma
+  // trực tiếp cho bảng attachments. Behaviour giữ nguyên.
+  // ---------------------------------------------------------------------------
   async createUploadUrl(dto: CreateUploadUrlDto) {
     if (!this.bucket) {
       throw new BusinessError(
@@ -60,8 +196,8 @@ export class AttachmentsService {
     }
     const key = this.buildKey(dto.relatedType, dto.relatedId, dto.fileName);
     const attachment = await this.prisma.$transaction(async (tx) => {
-      const row = await tx.attachment.create({
-        data: {
+      const row = await this.repo.create(
+        {
           fileName: dto.fileName,
           fileUrl: key,
           fileType: dto.fileType ?? inferFileType(dto.mimeType),
@@ -71,7 +207,8 @@ export class AttachmentsService {
           relatedId: dto.relatedId,
           createdById: this.ctx.getUserId() ?? null,
         },
-      });
+        tx,
+      );
       await this.audit.record(
         {
           action: "attachment.upload_url",
@@ -93,15 +230,13 @@ export class AttachmentsService {
   }
 
   async confirm(id: string, dto: ConfirmUploadDto) {
-    const a = await this.prisma.attachment.findUnique({ where: { id } });
+    const a = await this.repo.findById(id);
     if (!a) {
       throw new NotFoundException({ code: "ATTACHMENT_NOT_FOUND", message: "Attachment not found" });
     }
     return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.attachment.update({
-        where: { id },
-        data: { size: dto.size },
-      });
+      // ARCHITECTURE rule: chỉ Repository được chạm ORM. Không dùng tx.attachment.* trực tiếp.
+      const updated = await this.repo.update(id, { size: dto.size }, tx);
       await this.audit.record(
         {
           action: "attachment.confirm",
@@ -117,14 +252,11 @@ export class AttachmentsService {
   }
 
   async list(relatedType: string, relatedId: string) {
-    return this.prisma.attachment.findMany({
-      where: { relatedType, relatedId },
-      orderBy: { createdAt: "desc" },
-    });
+    return this.repo.findByEntity(relatedType, relatedId);
   }
 
   async downloadUrl(id: string) {
-    const a = await this.prisma.attachment.findUnique({ where: { id } });
+    const a = await this.repo.findById(id);
     if (!a) {
       throw new NotFoundException({ code: "ATTACHMENT_NOT_FOUND", message: "Attachment not found" });
     }
@@ -134,12 +266,12 @@ export class AttachmentsService {
   }
 
   async softDelete(id: string) {
-    const a = await this.prisma.attachment.findUnique({ where: { id } });
+    const a = await this.repo.findById(id);
     if (!a) {
       throw new NotFoundException({ code: "ATTACHMENT_NOT_FOUND", message: "Attachment not found" });
     }
     await this.prisma.$transaction(async (tx) => {
-      await tx.attachment.delete({ where: { id } });
+      await this.repo.deleteById(id, tx);
       await this.audit.record(
         {
           action: "attachment.delete",
@@ -150,12 +282,23 @@ export class AttachmentsService {
         tx,
       );
     });
-    // Best-effort remove from MinIO AFTER the row is gone; if S3 fails the DB
-    // change still commits (row deletion is the source of truth).
-    try {
-      await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: a.fileUrl }));
-    } catch (err) {
-      this.logger.warn(`Failed to remove S3 object ${a.fileUrl}: ${(err as Error).message}`);
+    // Best-effort cleanup on remote storage AFTER commit. If cleanup fails the
+    // DB delete still holds — DB row is the source of truth. We route by which
+    // remote storage the row lived on.
+    if (a.driveFileId) {
+      try {
+        await this.drive.deleteFile(a.driveFileId);
+      } catch (err) {
+        this.logger.warn(
+          `Failed to remove Drive file ${a.driveFileId}: ${(err as Error).message}`,
+        );
+      }
+    } else {
+      try {
+        await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: a.fileUrl }));
+      } catch (err) {
+        this.logger.warn(`Failed to remove S3 object ${a.fileUrl}: ${(err as Error).message}`);
+      }
     }
     return { id, deleted: true };
   }

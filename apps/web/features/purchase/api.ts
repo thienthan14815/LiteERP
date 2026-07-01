@@ -64,12 +64,13 @@ export interface CreatePurchaseDto {
   items: CreatePurchaseItemInput[];
 }
 
+export type SupplierCategory = "WHOLESALE" | "RETAIL";
+
 export interface CreateSupplierInput {
   name: string;
-  phone?: string;
-  email?: string;
-  address?: string;
-  taxCode?: string;
+  fbUrl?: string;
+  marketplaceUrl?: string;
+  category?: SupplierCategory;
   notes?: string;
 }
 

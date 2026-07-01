@@ -193,7 +193,8 @@ export default function MachineDetailPage() {
     (sum, it) => sum + (Number(it.cost) || 0),
     0,
   );
-  const allocMatches = Math.abs(allocTotal - machine.purchasePrice) < 1;
+  // machine.purchasePrice là Prisma Decimal → JSON string; phải Number() trước khi trừ.
+  const allocMatches = Math.abs(allocTotal - Number(machine.purchasePrice ?? 0)) < 1;
 
   const onInspect = async (values: InspectValues) => {
     try {

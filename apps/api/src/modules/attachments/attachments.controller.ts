@@ -1,4 +1,15 @@
-import { Body, Controller, Delete, Get, Param, Post, Query } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  Query,
+  UploadedFile,
+  UseInterceptors,
+} from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
 import { Permissions } from "../../common/decorators/permissions.decorator";
 import { AttachmentsService } from "./attachments.service";
 import {
@@ -6,6 +17,7 @@ import {
   CreateUploadUrlDto,
   QueryAttachmentsDto,
 } from "./dto/create-upload-url.dto";
+import { UploadDriveDto } from "./dto/upload-drive.dto";
 
 @Controller("attachments")
 export class AttachmentsController {
@@ -14,6 +26,18 @@ export class AttachmentsController {
   @Post("upload-url") @Permissions("attachment:create")
   uploadUrl(@Body() dto: CreateUploadUrlDto) {
     return this.svc.createUploadUrl(dto);
+  }
+
+  // VN: NEW — multipart upload trực tiếp qua Drive. Frontend chỉ nhận
+  // thumbnailUrl / previewUrl, không thấy driveFileId.
+  @Post("upload-drive")
+  @Permissions("attachment:create")
+  @UseInterceptors(FileInterceptor("file"))
+  uploadDrive(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() dto: UploadDriveDto,
+  ) {
+    return this.svc.uploadToDrive(file, dto);
   }
 
   @Post(":id/confirm") @Permissions("attachment:create")

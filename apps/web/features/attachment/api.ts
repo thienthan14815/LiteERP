@@ -3,39 +3,77 @@ import { apiClient } from "@/lib/api-client";
 export interface Attachment {
   id: string;
   fileName: string;
-  fileUrl: string;
+  fileUrl: string;         // legacy S3 (rỗng cho Drive) — giữ compat
   fileType: string;
   mimeType: string;
   size: number;
   relatedType: string;
   relatedId: string;
   createdAt: string;
-}
-
-interface UploadUrlResp {
-  attachmentId: string;
-  uploadUrl: string;
-  key: string;
-  expiresIn: number;
+  // Drive-specific (null nếu là legacy S3 record)
+  thumbnailUrl?: string | null;
+  previewUrl?: string | null;
 }
 
 function unwrap<T>(p: any): T {
   return (p?.data ?? p) as T;
 }
 
-export async function createUploadUrl(payload: {
-  fileName: string;
+// Response từ endpoint /attachments/upload-drive — không có driveFileId (rule 3).
+interface DriveAttachmentResponse {
+  id: string;
+  entityType: string;
+  entityId: string;
+  filename: string;
   mimeType: string;
-  relatedType: string;
-  relatedId: string;
-}): Promise<UploadUrlResp> {
-  const { data } = await apiClient.post("/attachments/upload-url", payload);
-  return unwrap<UploadUrlResp>(data);
+  sizeBytes: number;
+  thumbnailUrl: string | null;
+  previewUrl: string | null;
+  createdAt: string;
 }
 
-export async function confirmUpload(id: string, size: number): Promise<Attachment> {
-  const { data } = await apiClient.post(`/attachments/${id}/confirm`, { size });
-  return unwrap<Attachment>(data);
+// Map relatedType (VN: Machine / Component / ...) sang DriveFolder enum backend.
+function pickDriveFolder(relatedType: string): string {
+  const t = relatedType.toUpperCase();
+  if (t.includes("MACHINE") || t.includes("COMPONENT") || t.includes("FINISHED_PC")) return "PRODUCTS";
+  if (t.includes("PURCHASE")) return "ORDERS";
+  if (t.includes("SALES") || t === "SALE") return "ORDERS";
+  if (t.includes("CUSTOMER")) return "CUSTOMERS";
+  if (t.includes("SUPPLIER")) return "SUPPLIERS";
+  if (t.includes("INVOICE")) return "INVOICES";
+  return "RECEIPTS";
+}
+
+function toLegacyShape(r: DriveAttachmentResponse): Attachment {
+  return {
+    id: r.id,
+    fileName: r.filename,
+    fileUrl: "",                          // Drive không dùng cột này
+    fileType: r.mimeType.split("/")[0] || "file",
+    mimeType: r.mimeType,
+    size: r.sizeBytes,
+    relatedType: r.entityType,
+    relatedId: r.entityId,
+    createdAt: r.createdAt,
+    thumbnailUrl: r.thumbnailUrl,
+    previewUrl: r.previewUrl,
+  };
+}
+
+export async function uploadToDrive(payload: {
+  file: File;
+  relatedType: string;
+  relatedId: string;
+}): Promise<Attachment> {
+  const form = new FormData();
+  form.append("entityType", payload.relatedType);
+  form.append("entityId", payload.relatedId);
+  form.append("folder", pickDriveFolder(payload.relatedType));
+  form.append("file", payload.file);
+  const { data } = await apiClient.post("/attachments/upload-drive", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return toLegacyShape(unwrap<DriveAttachmentResponse>(data));
 }
 
 export async function listAttachments(relatedType: string, relatedId: string): Promise<Attachment[]> {

@@ -50,7 +50,7 @@ export class AuthService {
     let payload: JwtPayload;
     try {
       payload = await this.jwt.verifyAsync<JwtPayload>(rawToken, {
-        secret: this.config.get<string>("jwt.refreshSecret") ?? "dev-refresh-secret",
+        secret: this.requireSecret("jwt.refreshSecret"),
       });
     } catch {
       throw new UnauthorizedException({ code: "INVALID_REFRESH_TOKEN", message: "Invalid refresh token" });
@@ -118,9 +118,19 @@ export class AuthService {
     };
   }
 
+  private requireSecret(key: "jwt.accessSecret" | "jwt.refreshSecret"): string {
+    const value = this.config.get<string>(key);
+    if (!value || value.length < 32) {
+      throw new Error(
+        `[auth] ${key} is not configured or too short (<32 chars). Set JWT_ACCESS_SECRET / JWT_REFRESH_SECRET env.`,
+      );
+    }
+    return value;
+  }
+
   private async issueTokens(userId: string, email: string): Promise<TokenPair> {
-    const accessSecret = this.config.get<string>("jwt.accessSecret") ?? "dev-access-secret";
-    const refreshSecret = this.config.get<string>("jwt.refreshSecret") ?? "dev-refresh-secret";
+    const accessSecret = this.requireSecret("jwt.accessSecret");
+    const refreshSecret = this.requireSecret("jwt.refreshSecret");
     const accessExpiresIn = this.config.get<string>("jwt.accessExpiresIn") ?? "15m";
     const refreshExpiresIn = this.config.get<string>("jwt.refreshExpiresIn") ?? "30d";
 

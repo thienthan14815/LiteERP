@@ -25,7 +25,6 @@ export class SuppliersService {
           OR: [
             { name: { contains: q.search, mode: "insensitive" } },
             { code: { contains: q.search, mode: "insensitive" } },
-            { phone: { contains: q.search, mode: "insensitive" } },
           ],
         }
       : {};
@@ -52,10 +51,9 @@ export class SuppliersService {
         data: {
           code,
           name: dto.name,
-          phone: dto.phone ?? null,
-          email: dto.email ?? null,
-          address: dto.address ?? null,
-          taxCode: dto.taxCode ?? null,
+          fbUrl: dto.fbUrl ?? null,
+          marketplaceUrl: dto.marketplaceUrl ?? null,
+          category: dto.category ?? null,
           notes: dto.notes ?? null,
           createdById: this.ctx.getUserId() ?? null,
         },
@@ -76,10 +74,9 @@ export class SuppliersService {
         where: { id },
         data: {
           name: dto.name ?? before.name,
-          phone: dto.phone ?? before.phone,
-          email: dto.email ?? before.email,
-          address: dto.address ?? before.address,
-          taxCode: dto.taxCode ?? before.taxCode,
+          fbUrl: dto.fbUrl ?? before.fbUrl,
+          marketplaceUrl: dto.marketplaceUrl ?? before.marketplaceUrl,
+          category: dto.category ?? before.category,
           notes: dto.notes ?? before.notes,
         },
       });

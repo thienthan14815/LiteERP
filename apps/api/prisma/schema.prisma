@@ -117,6 +117,11 @@ enum ComponentCondition {
   LIQUIDATION
 }
 
+enum SupplierCategory {
+  WHOLESALE
+  RETAIL
+}
+
 // ============================================================================
 // AUTH & RBAC
 // ============================================================================
@@ -211,11 +216,16 @@ model Supplier {
   id          String   @id @default(cuid())
   code        String   @unique
   name        String
+  // Legacy — giữ nullable để tránh mất dữ liệu cũ; form mới không hiển thị/nhận.
   phone       String?
   email       String?
   address     String?
   taxCode     String?  @map("tax_code")
   notes       String?
+  // Fields mới theo yêu cầu — profile nhà cung cấp online.
+  fbUrl           String?           @map("fb_url")
+  marketplaceUrl  String?           @map("marketplace_url")
+  category        SupplierCategory?
   tenantId    String?  @map("tenant_id")
   branchId    String?  @map("branch_id")
   createdById String?  @map("created_by_id")
@@ -226,6 +236,7 @@ model Supplier {
   purchaseOrders PurchaseOrder[]
 
   @@index([name])
+  @@index([category])
   @@index([tenantId])
   @@index([branchId])
   @@map("suppliers")
@@ -716,6 +727,9 @@ model Expense {
 }
 
 // Attachment schema follows ARCHITECTURE.md section 16.
+// Phase 1.5 (drive_integration): added optional driveFileId so the same table
+// can carry either an S3/MinIO key (legacy fileUrl) OR a Google Drive file id.
+// Existing rows keep their S3 key — nothing removed.
 model Attachment {
   id          String   @id @default(cuid())
   fileName    String   @map("file_name")
@@ -725,6 +739,7 @@ model Attachment {
   size        Int
   relatedType String   @map("related_type") // MACHINE / COMPONENT / SALES_ORDER / ...
   relatedId   String   @map("related_id")
+  driveFileId String?  @map("drive_file_id")
   tenantId    String?  @map("tenant_id")
   branchId    String?  @map("branch_id")
   createdById String?  @map("created_by_id")
@@ -734,6 +749,7 @@ model Attachment {
 
   @@index([relatedType, relatedId])
   @@index([fileType])
+  @@index([driveFileId])
   @@index([tenantId])
   @@index([branchId])
   @@map("attachments")
@@ -761,6 +777,26 @@ model CodeCounter {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("code_counters")
+}
+
+// Backup metadata — 1 row / lần dump lên Google Drive. Không lưu file, chỉ pointer.
+enum BackupKind {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+model BackupRecord {
+  id          String     @id @default(cuid())
+  driveFileId String     @unique @map("drive_file_id")
+  filename    String
+  sizeBytes   Int        @map("size_bytes")
+  kind        BackupKind @default(DAILY)
+  createdAt   DateTime   @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@index([kind])
+  @@map("backup_records")
 }
 
 // Audit log schema follows ARCHITECTURE.md section 17.

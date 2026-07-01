@@ -41,14 +41,19 @@ export class InventoryService {
   }
 
   async summary() {
-    const byStatus = await this.prisma.component.groupBy({
+    const byStatusRaw = await this.prisma.component.groupBy({
       by: ["status"],
       _count: { _all: true },
     });
-    const byCategory = await this.prisma.component.groupBy({
+    const byCategoryRaw = await this.prisma.component.groupBy({
       by: ["categoryId"],
       _count: { _all: true },
     });
+    // Map categoryId -> categoryCode để client hiển thị nhãn đúng.
+    const categories = await this.prisma.componentCategory.findMany({
+      select: { id: true, code: true },
+    });
+    const idToCode = new Map(categories.map((c) => [c.id, c.code]));
     const machineByStatus = await this.prisma.machine.groupBy({
       by: ["status"],
       _count: { _all: true },
@@ -58,10 +63,12 @@ export class InventoryService {
       _count: { _all: true },
     });
     return {
-      components: {
-        byStatus: Object.fromEntries(byStatus.map((g) => [g.status, g._count._all])),
-        byCategory: Object.fromEntries(byCategory.map((g) => [g.categoryId, g._count._all])),
-      },
+      // Shape phẳng khớp UI /components/summary (mảng object).
+      byStatus: byStatusRaw.map((g) => ({ status: g.status, count: g._count._all })),
+      byCategory: byCategoryRaw
+        .map((g) => ({ category: idToCode.get(g.categoryId) ?? "OTHER", count: g._count._all }))
+        .filter((g) => g.count > 0),
+      // Extra data cho các consumer khác (dashboard, mobile).
       machines: Object.fromEntries(machineByStatus.map((g) => [g.status, g._count._all])),
       finishedPcs: Object.fromEntries(finishedByStatus.map((g) => [g.status, g._count._all])),
     };

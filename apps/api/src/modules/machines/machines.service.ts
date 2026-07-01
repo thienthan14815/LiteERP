@@ -78,7 +78,9 @@ export class MachinesService {
     }
     return this.prisma.$transaction(async (tx) => {
       // Wipe any prior MachineComponent rows in case inspect is re-run (still NEW).
-      await tx.machineComponent.deleteMany({ where: { machineId: id, componentId: null } });
+      // Xoá toàn bộ rows của máy này, không chỉ những row chưa link componentId,
+      // tránh sót dữ liệu cũ khi lần inspect trước đã tạo component.
+      await tx.machineComponent.deleteMany({ where: { machineId: id } });
 
       for (const c of dto.components) {
         const category = await tx.componentCategory.findUnique({ where: { code: c.categoryCode } });
