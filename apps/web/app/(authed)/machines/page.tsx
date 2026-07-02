@@ -55,7 +55,10 @@ export default function MachinesListPage() {
 
   return (
     <div>
-      <PageHeader title="Máy mua vào" description="Danh sách máy cũ" />
+      <PageHeader
+        title="Máy cũ nhập kho"
+        description="Máy vừa mua về, chờ kiểm tra / tháo linh kiện"
+      />
       <Card className="mb-4">
         <CardContent className="grid gap-3 p-4 sm:grid-cols-3">
           <div>

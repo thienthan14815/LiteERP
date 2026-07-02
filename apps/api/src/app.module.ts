@@ -28,6 +28,7 @@ import { InventoryModule } from "./modules/inventory/inventory.module";
 import { AssembliesModule } from "./modules/assemblies/assemblies.module";
 import { FinishedPcsModule } from "./modules/finished-pcs/finished-pcs.module";
 import { SalesModule } from "./modules/sales/sales.module";
+import { MasterOptionsModule } from "./modules/master-options/master-options.module";
 import { WarrantiesModule } from "./modules/warranties/warranties.module";
 import { ReportsModule } from "./modules/reports/reports.module";
 import { AuditLogsModule } from "./modules/audit-logs/audit-logs.module";
@@ -59,6 +60,7 @@ import { HealthModule } from "./modules/health/health.module";
     AssembliesModule,
     FinishedPcsModule,
     SalesModule,
+    MasterOptionsModule,
     WarrantiesModule,
     ReportsModule,
     AttachmentsModule,

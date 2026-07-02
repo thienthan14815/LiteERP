@@ -40,7 +40,12 @@ export class SalesService {
       if (q.toDate) (where.createdAt as Prisma.DateTimeFilter).lte = new Date(q.toDate);
     }
     if (q.search) {
-      where.OR = [{ code: { contains: q.search, mode: "insensitive" } }];
+      where.OR = [
+        { code: { contains: q.search, mode: "insensitive" } },
+        { orderName: { contains: q.search, mode: "insensitive" } },
+        { sellerName: { contains: q.search, mode: "insensitive" } },
+        { platform: { contains: q.search, mode: "insensitive" } },
+      ];
     }
     const { take, skip } = buildPagination(q.page, q.pageSize);
     const [items, total] = await this.prisma.$transaction([
@@ -234,6 +239,10 @@ export class SalesService {
         data: {
           code,
           customerId: dto.customerId,
+          orderName: dto.orderName ?? null,
+          sellerName: dto.sellerName ?? null,
+          platform: dto.platform ?? null,
+          salesUrl: dto.salesUrl ?? null,
           status: SalesOrderStatus.DRAFT,
           totalAmount,
           notes: dto.notes ?? null,
@@ -316,6 +325,10 @@ export class SalesService {
         where: { id },
         data: {
           customerId: dto.customerId ?? before.customerId,
+          orderName: dto.orderName ?? before.orderName,
+          sellerName: dto.sellerName ?? before.sellerName,
+          platform: dto.platform ?? before.platform,
+          salesUrl: dto.salesUrl ?? before.salesUrl,
           notes: dto.notes ?? before.notes,
           totalAmount,
         },

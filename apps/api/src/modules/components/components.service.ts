@@ -3,6 +3,7 @@ import { ComponentStatus, Prisma, StockTxnType } from "@prisma/client";
 import { PrismaService } from "../../database/prisma.service";
 import { AuditLogService } from "../audit-logs/audit-logs.service";
 import { StockTransactionService } from "../inventory/stock-transaction.service";
+import { DriveService } from "../drive/drive.service";
 import { BusinessError } from "../../common/exceptions/business.exception";
 import { buildPagination, paginate } from "../../common/utils/pagination.util";
 import { QueryComponentDto } from "./dto/query-component.dto";
@@ -14,6 +15,7 @@ export class ComponentsService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditLogService,
     private readonly stock: StockTransactionService,
+    private readonly drive: DriveService,
   ) {}
 
   async list(q: QueryComponentDto) {
@@ -42,10 +44,33 @@ export class ComponentsService {
       }),
       this.prisma.component.count({ where }),
     ]);
+
+    // Lấy ảnh đầu tiên (mimeType image/*) cho mỗi component trong trang.
+    const ids = items.map((c) => c.id);
+    const thumbById = new Map<string, string>();
+    if (ids.length > 0) {
+      // relatedType lịch sử có 2 biến thể: "Component" (Pascal) từ UI chi tiết,
+      // "COMPONENT" (Screaming) từ các nơi khác — match cả hai.
+      const atts = await this.prisma.attachment.findMany({
+        where: {
+          relatedType: { in: ["Component", "COMPONENT"] },
+          relatedId: { in: ids },
+          mimeType: { startsWith: "image/" },
+        },
+        orderBy: { createdAt: "asc" },
+      });
+      for (const a of atts) {
+        if (!thumbById.has(a.relatedId) && a.driveFileId) {
+          thumbById.set(a.relatedId, this.drive.getThumbnailUrl(a.driveFileId));
+        }
+      }
+    }
+
     const projected = items.map((c) => ({
       ...c,
       serial: c.serialNumber,
       categoryCode: c.category.code,
+      thumbnailUrl: thumbById.get(c.id) ?? null,
     }));
     return paginate(projected, total, q.page ?? 1, q.pageSize ?? 20);
   }

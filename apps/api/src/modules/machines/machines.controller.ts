@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import { MachinesService } from "./machines.service";
 import { QueryMachineDto } from "./dto/query-machine.dto";
 import { InspectMachineDto } from "./dto/inspect-machine.dto";
 import { AllocateCostDto } from "./dto/allocate-cost.dto";
+import { UpdateMachineDto } from "./dto/update-machine.dto";
 import { Permissions } from "../../common/decorators/permissions.decorator";
 
 @Controller("machines")
@@ -14,6 +15,11 @@ export class MachinesController {
 
   @Get(":id") @Permissions("machine:view")
   get(@Param("id") id: string) { return this.svc.get(id); }
+
+  @Patch(":id") @Permissions("machine:update")
+  update(@Param("id") id: string, @Body() dto: UpdateMachineDto) {
+    return this.svc.update(id, dto);
+  }
 
   @Post(":id/inspect") @Permissions("machine:inspect")
   inspect(@Param("id") id: string, @Body() dto: InspectMachineDto) {

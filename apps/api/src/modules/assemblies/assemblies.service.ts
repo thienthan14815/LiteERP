@@ -395,7 +395,9 @@ export class AssembliesService {
         data: {
           code: pcCode,
           assemblyOrderId: before.id,
-          status: FinishedPcStatus.ASSEMBLING,
+          // Hoàn thành phiếu lắp ráp = máy sẵn sàng lên kệ (READY_FOR_SALE).
+          // User có thể transition ngược về TESTING nếu cần retest.
+          status: FinishedPcStatus.READY_FOR_SALE,
           costPrice,
           suggestedPrice: 0,
           createdById: this.ctx.getUserId() ?? null,

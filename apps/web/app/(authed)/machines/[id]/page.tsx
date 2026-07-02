@@ -63,7 +63,17 @@ import {
   useInspectMachine,
   useMachine,
   useMarkMachineReady,
+  useUpdateMachine,
 } from "@/features/inventory/hooks";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Pencil } from "lucide-react";
 
 const DEFAULT_SLOTS: ComponentCategoryCode[] = [
   ComponentCategoryCode.CPU,
@@ -109,9 +119,14 @@ export default function MachineDetailPage() {
   const allocMut = useAllocateMachineCost(params.id);
   const disMut = useDisassembleMachine(params.id);
   const readyMut = useMarkMachineReady(params.id);
+  const updateMut = useUpdateMachine(params.id);
 
   const [disOpen, setDisOpen] = React.useState(false);
   const [readyOpen, setReadyOpen] = React.useState(false);
+  const [editOpen, setEditOpen] = React.useState(false);
+  const [editSerial, setEditSerial] = React.useState("");
+  const [editPrice, setEditPrice] = React.useState<number | "">(0);
+  const [editNotes, setEditNotes] = React.useState("");
 
   const inspectForm = useForm<InspectValues>({
     resolver: zodResolver(inspectSchema),
@@ -260,11 +275,97 @@ export default function MachineDetailPage() {
         title={`Máy ${machine.code}`}
         description={`Trạng thái: ${MACHINE_STATUS_LABEL[machine.status]}`}
         actions={
-          <Button variant="outline" onClick={() => router.push("/machines")}>
-            Quay lại
-          </Button>
+          <div className="flex gap-2">
+            {machine.status !== MachineStatus.SOLD &&
+              machine.status !== MachineStatus.SCRAP && (
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setEditSerial(machine.serial ?? "");
+                    setEditPrice(Number(machine.purchasePrice ?? 0));
+                    setEditNotes(machine.notes ?? "");
+                    setEditOpen(true);
+                  }}
+                >
+                  <Pencil className="mr-2 h-4 w-4" /> Sửa
+                </Button>
+              )}
+            <Button variant="outline" onClick={() => router.push("/machines")}>
+              Quay lại
+            </Button>
+          </div>
         }
       />
+
+      {/* Dialog sửa metadata cơ bản */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Sửa thông tin máy {machine.code}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label htmlFor="edit-serial">Serial</Label>
+              <Input
+                id="edit-serial"
+                value={editSerial}
+                onChange={(e) => setEditSerial(e.target.value)}
+                placeholder="VD: ABC-12345"
+              />
+            </div>
+            <div>
+              <Label htmlFor="edit-price">Giá mua (TWD)</Label>
+              <Input
+                id="edit-price"
+                type="number"
+                min={0}
+                value={editPrice}
+                onChange={(e) =>
+                  setEditPrice(e.target.value === "" ? "" : Number(e.target.value))
+                }
+              />
+            </div>
+            <div>
+              <Label htmlFor="edit-notes">Ghi chú</Label>
+              <Textarea
+                id="edit-notes"
+                rows={3}
+                value={editNotes}
+                onChange={(e) => setEditNotes(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setEditOpen(false)}
+              disabled={updateMut.isPending}
+            >
+              Hủy
+            </Button>
+            <Button
+              onClick={async () => {
+                try {
+                  await updateMut.mutateAsync({
+                    serial: editSerial.trim(),
+                    purchasePrice: Number(editPrice || 0),
+                    notes: editNotes,
+                  });
+                  toast.success("Đã lưu");
+                  setEditOpen(false);
+                } catch (err: any) {
+                  toast.error(
+                    err?.response?.data?.error?.message ?? "Không lưu được",
+                  );
+                }
+              }}
+              disabled={updateMut.isPending}
+            >
+              {updateMut.isPending ? "Đang lưu..." : "Lưu"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Card className="mb-4">
         <CardContent className="grid gap-4 p-4 sm:grid-cols-4 text-sm">

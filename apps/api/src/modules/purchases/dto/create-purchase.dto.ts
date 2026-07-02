@@ -20,6 +20,12 @@ export class CreatePurchaseItemDto {
   @IsString()
   description!: string;
 
+  @IsOptional() @IsString()
+  model?: string;
+
+  @IsOptional() @IsString()
+  serial?: string;
+
   @IsInt() @IsPositive()
   quantity!: number;
 

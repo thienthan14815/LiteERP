@@ -7,6 +7,7 @@
 import { HttpStatus, Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { BackupKind } from "@prisma/client";
+import AdmZip from "adm-zip";
 import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
@@ -67,12 +68,13 @@ export class BackupService {
     const strategy = (process.env.BACKUP_STRATEGY ?? "docker").toLowerCase();
     const dockerContainer = process.env.BACKUP_DOCKER_CONTAINER ?? "refurb-postgres";
 
-    const filename = this.buildFilename();
-    const tmpPath = join(tmpdir(), filename);
+    const sqlFilename = this.buildSqlFilename();
+    const zipFilename = this.buildZipFilename();
+    const tmpSqlPath = join(tmpdir(), sqlFilename);
     try {
-      await this.runDump(strategy, dockerContainer, dbUrl, tmpPath);
+      await this.runDump(strategy, dockerContainer, dbUrl, tmpSqlPath);
 
-      const stat = await fs.stat(tmpPath);
+      const stat = await fs.stat(tmpSqlPath);
       if (stat.size === 0) {
         throw new BusinessError(
           "BACKUP_UNAVAILABLE",
@@ -80,14 +82,20 @@ export class BackupService {
           HttpStatus.INTERNAL_SERVER_ERROR,
         );
       }
-      const buffer = await fs.readFile(tmpPath);
+      const sqlBuffer = await fs.readFile(tmpSqlPath);
+
+      // Gói .sql vào .zip — dump SQL nén rất tốt (thường ~5-10x nhỏ hơn).
+      const zip = new AdmZip();
+      zip.addFile(sqlFilename, sqlBuffer);
+      const zipBuffer = zip.toBuffer();
 
       const uploaded = await this.drive.uploadFile(
-        buffer,
-        filename,
-        "application/sql",
+        zipBuffer,
+        zipFilename,
+        "application/zip",
         DriveFolder.BACKUP,
       );
+      const filename = zipFilename;
 
       // Rule 4: mọi write đi qua $transaction — insert record + audit atomic.
       const record = await this.prisma.$transaction(async (tx) => {
@@ -112,9 +120,13 @@ export class BackupService {
         return rec;
       });
 
-      // Retention GFS chạy sau khi commit — nếu retention lỗi thì bản vừa upload
-      // vẫn an toàn (đã có record trong DB + file trên Drive).
-      const retention = await this.runRetention();
+      // Retention GFS: mặc định TẮT — user muốn giữ toàn bộ backup trên Drive.
+      // Bật lại bằng BACKUP_RETENTION_ENABLED=true nếu cần cắt tỉa sau này.
+      const retentionEnabled =
+        (process.env.BACKUP_RETENTION_ENABLED ?? "false").toLowerCase() === "true";
+      const retention = retentionEnabled
+        ? await this.runRetention()
+        : { kept: await this.countAllBackups(), deleted: 0 };
 
       // Rule 3: KHÔNG trả driveFileId.
       return {
@@ -126,8 +138,13 @@ export class BackupService {
         retention,
       };
     } finally {
-      await fs.unlink(tmpPath).catch(() => undefined);
+      await fs.unlink(tmpSqlPath).catch(() => undefined);
     }
+  }
+
+  private async countAllBackups(): Promise<number> {
+    const rows = await this.repo.findAllOrderedNewestFirst();
+    return rows.length;
   }
 
   async list(): Promise<BackupListItem[]> {
@@ -139,6 +156,162 @@ export class BackupService {
       kind: r.kind,
       createdAt: r.createdAt.toISOString(),
     }));
+  }
+
+  /**
+   * Phục hồi DB từ file .zip (chứa .sql) hoặc .sql thuần.
+   * DANGEROUS: sẽ DROP mọi bảng và load lại từ dump. Không rollback được.
+   * Chỉ ADMIN được gọi (guard ở controller).
+   */
+  async restore(
+    file: { originalname: string; mimetype: string; buffer: Buffer },
+  ): Promise<{ restoredFrom: string; sizeBytes: number; durationMs: number }> {
+    const t0 = Date.now();
+    if (!file || !file.buffer || file.buffer.length === 0) {
+      throw new BusinessError(
+        "RESTORE_INVALID_FILE",
+        "File phục hồi trống hoặc không hợp lệ",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    // Tách .sql ra khỏi zip nếu là zip; nếu là .sql thuần → dùng thẳng.
+    const lname = (file.originalname ?? "").toLowerCase();
+    let sqlBuffer: Buffer;
+    if (lname.endsWith(".zip")) {
+      try {
+        const zip = new AdmZip(file.buffer);
+        const entries = zip.getEntries().filter((e) => !e.isDirectory && e.entryName.toLowerCase().endsWith(".sql"));
+        if (entries.length === 0) {
+          throw new BusinessError(
+            "RESTORE_INVALID_FILE",
+            "File .zip không chứa file .sql nào",
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+        // Nếu có nhiều .sql, chọn cái đầu (backup của app này chỉ có 1).
+        sqlBuffer = entries[0].getData();
+      } catch (err) {
+        if (err instanceof BusinessError) throw err;
+        throw new BusinessError(
+          "RESTORE_INVALID_FILE",
+          `Không giải nén được .zip: ${(err as Error).message}`,
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+    } else if (lname.endsWith(".sql")) {
+      sqlBuffer = file.buffer;
+    } else {
+      throw new BusinessError(
+        "RESTORE_INVALID_FILE",
+        "Chỉ nhận .sql hoặc .zip (chứa .sql)",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    if (sqlBuffer.length === 0) {
+      throw new BusinessError(
+        "RESTORE_INVALID_FILE",
+        "File SQL trống sau khi giải nén",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    // Audit TRƯỚC khi restore (vì restore sẽ ghi đè cả bảng audit_logs).
+    // Nếu restore fail, audit này vẫn tồn tại.
+    await this.audit.record({
+      action: "backup.restore.start",
+      entityType: "Backup",
+      entityId: "*",
+      after: { filename: file.originalname, sizeBytes: sqlBuffer.length },
+    });
+
+    // Ngắt Prisma trước để tránh giữ connection khi psql restore.
+    // (KHÔNG cần disconnect hoàn toàn — psql chạy ngoài Node, dùng connection riêng)
+    const strategy = (process.env.BACKUP_STRATEGY ?? "docker").toLowerCase();
+    const dockerContainer = process.env.BACKUP_DOCKER_CONTAINER ?? "refurb-postgres";
+    const tmpSqlPath = join(tmpdir(), `restore-${Date.now()}.sql`);
+    try {
+      await fs.writeFile(tmpSqlPath, sqlBuffer);
+      await this.runRestore(strategy, dockerContainer, tmpSqlPath);
+    } finally {
+      await fs.unlink(tmpSqlPath).catch(() => undefined);
+    }
+
+    // Sau restore audit_logs đã bị ghi đè — audit "start" ở trên đã mất, nhưng
+    // vẫn ghi audit "done" mới để đánh dấu điểm phục hồi.
+    await this.audit.record({
+      action: "backup.restore.done",
+      entityType: "Backup",
+      entityId: "*",
+      after: {
+        filename: file.originalname,
+        sizeBytes: sqlBuffer.length,
+        durationMs: Date.now() - t0,
+      },
+    });
+
+    return {
+      restoredFrom: file.originalname,
+      sizeBytes: sqlBuffer.length,
+      durationMs: Date.now() - t0,
+    };
+  }
+
+  private runRestore(
+    strategy: string,
+    container: string,
+    sqlFilePath: string,
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      // Chiến lược docker: `docker exec -i <container> psql -U app -d app`
+      // stdin nhận SQL. -i giữ stdin mở để pipe.
+      const dockerMode = strategy === "docker";
+      const cmd = dockerMode ? "docker" : "psql";
+      const args = dockerMode
+        ? [
+            "exec",
+            "-i",
+            container,
+            "psql",
+            "-U",
+            "app",
+            "-d",
+            "app",
+            "-v",
+            "ON_ERROR_STOP=1",
+          ]
+        : ["-U", "app", "-d", "app", "-v", "ON_ERROR_STOP=1"];
+      const child = spawn(cmd, args, {
+        shell: process.platform === "win32",
+      });
+      let stderr = "";
+      child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
+      child.on("error", (err) =>
+        reject(
+          new BusinessError(
+            "RESTORE_UNAVAILABLE",
+            `${cmd} spawn error: ${err.message}`,
+            HttpStatus.SERVICE_UNAVAILABLE,
+          ),
+        ),
+      );
+      child.on("close", (code) => {
+        if (code === 0) return resolve();
+        reject(
+          new BusinessError(
+            "RESTORE_FAILED",
+            `Restore SQL exit code ${code}: ${stderr.slice(0, 800)}`,
+            HttpStatus.INTERNAL_SERVER_ERROR,
+          ),
+        );
+      });
+      // Pipe .sql file vào stdin của psql.
+      import("node:fs").then((fsSync) => {
+        const rs = fsSync.createReadStream(sqlFilePath);
+        rs.pipe(child.stdin);
+      });
+    });
   }
 
   async remove(id: string): Promise<{ deleted: true }> {
@@ -249,11 +422,18 @@ export class BackupService {
     return { deleted: successfulIds.length, kept: keep.size };
   }
 
-  private buildFilename(): string {
+  private buildSqlFilename(): string {
+    return `app-${this.stamp()}.sql`;
+  }
+
+  private buildZipFilename(): string {
+    return `app-${this.stamp()}.zip`;
+  }
+
+  private stamp(): string {
     const now = new Date();
     const pad = (n: number) => n.toString().padStart(2, "0");
-    const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
-    return `app-${stamp}.sql`;
+    return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
   }
 
   private async runDump(

@@ -252,7 +252,10 @@ export class AttachmentsService {
   }
 
   async list(relatedType: string, relatedId: string) {
-    return this.repo.findByEntity(relatedType, relatedId);
+    const rows = await this.repo.findByEntity(relatedType, relatedId);
+    // Rule 3 + Drive URL derivation: MỌI response phải đi qua toResponse để
+    // (1) không leak driveFileId, (2) tự sinh thumbnailUrl/previewUrl từ driveFileId.
+    return rows.map((r) => this.toResponse(r));
   }
 
   async downloadUrl(id: string) {

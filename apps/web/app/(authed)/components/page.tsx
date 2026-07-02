@@ -30,6 +30,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/tables/status-badge";
 import { EmptyState } from "@/components/tables/empty-state";
 import { DataPagination } from "@/components/tables/data-pagination";
+import { ThumbnailHoverPreview } from "@/components/tables/thumbnail-hover-preview";
 import {
   COMPONENT_CATEGORY_LABEL,
   COMPONENT_CONDITION_LABEL,
@@ -187,6 +188,7 @@ export default function ComponentsListPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-20">Hình ảnh</TableHead>
                   <TableHead>Mã</TableHead>
                   <TableHead>Serial</TableHead>
                   <TableHead>Loại</TableHead>
@@ -199,6 +201,13 @@ export default function ComponentsListPage() {
               <TableBody>
                 {data.data.map((c) => (
                   <TableRow key={c.id}>
+                    <TableCell>
+                      <ThumbnailHoverPreview
+                        href={`/components/${c.id}`}
+                        thumbnailUrl={c.thumbnailUrl}
+                        alt={c.code}
+                      />
+                    </TableCell>
                     <TableCell className="font-medium">{c.code}</TableCell>
                     <TableCell>{c.serial ?? "-"}</TableCell>
                     <TableCell>

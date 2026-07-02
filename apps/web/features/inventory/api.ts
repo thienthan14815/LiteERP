@@ -99,7 +99,21 @@ export async function inspectMachine(
   id: string,
   payload: InspectMachineDto,
 ): Promise<MachineDetail> {
-  const { data } = await apiClient.post(`/machines/${id}/inspect`, payload);
+  // Backend DTO key is `components` (not `slots`) và `condition` là bắt buộc,
+  // nên phải map lại ở boundary để tránh Validation failed.
+  const body = {
+    components: payload.slots
+      .filter((s) => !!s.categoryCode)
+      .map((s) => ({
+        categoryCode: s.categoryCode,
+        model: s.model?.trim() ? s.model.trim() : undefined,
+        serial: s.serial?.trim() ? s.serial.trim() : undefined,
+        condition: s.condition ?? ComponentCondition.GOOD,
+        notes: s.notes?.trim() ? s.notes.trim() : undefined,
+      })),
+    notes: payload.notes?.trim() ? payload.notes.trim() : undefined,
+  };
+  const { data } = await apiClient.post(`/machines/${id}/inspect`, body);
   return unwrap<MachineDetail>(data);
 }
 
@@ -136,6 +150,20 @@ export async function markMachineReadyForSale(
   return unwrap<MachineDetail>(data);
 }
 
+export interface UpdateMachineDto {
+  serial?: string;
+  notes?: string;
+  purchasePrice?: number;
+}
+
+export async function updateMachine(
+  id: string,
+  payload: UpdateMachineDto,
+): Promise<MachineDetail> {
+  const { data } = await apiClient.patch(`/machines/${id}`, payload);
+  return unwrap<MachineDetail>(data);
+}
+
 /* ---------------- COMPONENTS ---------------- */
 
 export interface ComponentListItem {
@@ -151,6 +179,7 @@ export interface ComponentListItem {
   sourceMachineId?: string | null;
   currentFinishedPcId?: string | null;
   createdAt: string;
+  thumbnailUrl?: string | null;
 }
 
 export interface ComponentDetail extends ComponentListItem {
@@ -169,7 +198,10 @@ export interface ComponentDetail extends ComponentListItem {
 export interface ComponentListQuery {
   page?: number;
   pageSize?: number;
+  // Legacy alias — vẫn nhận `category` từ callsite cũ; sẽ được đổi sang
+  // `categoryCode` khi gửi để khớp backend DTO (QueryComponentDto).
   category?: ComponentCategoryCode | "ALL";
+  categoryCode?: ComponentCategoryCode | "ALL";
   status?: ComponentStatus | "ALL";
   condition?: ComponentCondition | "ALL";
   search?: string;
@@ -179,7 +211,12 @@ export async function listComponents(
   query: ComponentListQuery = {},
 ): Promise<PaginatedResponse<ComponentListItem>> {
   const params: Record<string, unknown> = { ...query };
-  for (const k of ["category", "status", "condition"]) {
+  // Map alias `category` → `categoryCode` (backend chỉ nhận `categoryCode`).
+  if (params.category !== undefined) {
+    if (params.categoryCode === undefined) params.categoryCode = params.category;
+    delete params.category;
+  }
+  for (const k of ["categoryCode", "status", "condition"]) {
     if (params[k] === "ALL") delete params[k];
   }
   const { data } = await apiClient.get("/components", { params });

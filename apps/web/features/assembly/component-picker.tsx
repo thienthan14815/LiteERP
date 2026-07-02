@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Check, ChevronsUpDown, Loader2 } from "lucide-react";
+import { ComponentCategoryCode } from "@app/shared";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -30,6 +31,8 @@ interface ComponentPickerProps {
   excludeIds?: string[];
   disabled?: boolean;
   placeholder?: string;
+  // Nếu có, chỉ tìm/hiển thị linh kiện thuộc category này (server-side filter).
+  categoryCode?: ComponentCategoryCode;
 }
 
 export function ComponentPicker({
@@ -38,13 +41,15 @@ export function ComponentPicker({
   excludeIds = [],
   disabled,
   placeholder = "Chọn linh kiện...",
+  categoryCode,
 }: ComponentPickerProps) {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
 
   const { data: results = [], isFetching } = useQuery({
-    queryKey: ["components", "in-stock-search", query],
-    queryFn: () => searchInStockComponents(query),
+    // categoryCode nằm trong queryKey → tự refetch khi user đổi vai trò.
+    queryKey: ["components", "in-stock-search", query, categoryCode ?? "ALL"],
+    queryFn: () => searchInStockComponents(query, categoryCode),
     staleTime: 15_000,
   });
 

@@ -32,6 +32,7 @@ import {
   useComponent,
   useScrapComponent,
 } from "@/features/inventory/hooks";
+import { AttachmentUploader } from "@/components/forms/attachment-uploader";
 
 export default function ComponentDetailPage() {
   const params = useParams<{ id: string }>();
@@ -125,7 +126,7 @@ export default function ComponentDetailPage() {
                 "-"
               )}
             </Row>
-            <Row label="Máy thành phẩm">
+            <Row label="Máy tính">
               {data.currentFinishedPc ? (
                 <Link
                   className="text-primary underline"
@@ -149,7 +150,7 @@ export default function ComponentDetailPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Máy thành phẩm</TableHead>
+                    <TableHead>Máy tính</TableHead>
                     <TableHead>Lắp lúc</TableHead>
                     <TableHead>Tháo lúc</TableHead>
                   </TableRow>
@@ -178,6 +179,15 @@ export default function ComponentDetailPage() {
                 Chưa có lịch sử.
               </p>
             )}
+          </CardContent>
+        </Card>
+
+        <Card className="lg:col-span-3">
+          <CardHeader>
+            <CardTitle>Hình ảnh sản phẩm</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <AttachmentUploader relatedType="Component" relatedId={data.id} />
           </CardContent>
         </Card>
 

@@ -86,7 +86,7 @@ export const SALES_ORDER_STATUS_LABEL: Record<SalesOrderStatus, string> = {
 };
 
 export const SALES_ITEM_TYPE_LABEL: Record<SalesItemType, string> = {
-  [SalesItemType.FINISHED_PC]: "Máy thành phẩm",
+  [SalesItemType.FINISHED_PC]: "Máy tính",
   [SalesItemType.COMPONENT]: "Linh kiện",
 };
 

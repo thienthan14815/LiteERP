@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { Pencil, Trash2 } from "lucide-react";
 import { PurchaseOrderStatus } from "@app/shared";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -29,8 +30,11 @@ import { formatVnd, formatDateTime } from "@/lib/utils";
 import {
   useCancelPurchase,
   useConfirmPurchase,
+  useDeletePurchaseItem,
   usePurchase,
 } from "@/features/purchase/hooks";
+import { EditPurchaseItemDialog } from "@/features/purchase/edit-item-dialog";
+import type { PurchaseItem } from "@/features/purchase/api";
 import { AttachmentUploader } from "@/components/forms/attachment-uploader";
 
 export default function PurchaseDetailPage() {
@@ -39,8 +43,11 @@ export default function PurchaseDetailPage() {
   const { data, isLoading, isError } = usePurchase(params.id);
   const confirmMut = useConfirmPurchase();
   const cancelMut = useCancelPurchase();
+  const deleteItemMut = useDeletePurchaseItem(params.id ?? "");
   const [confirmOpen, setConfirmOpen] = React.useState(false);
   const [cancelOpen, setCancelOpen] = React.useState(false);
+  const [editItem, setEditItem] = React.useState<PurchaseItem | null>(null);
+  const [deleteItemId, setDeleteItemId] = React.useState<string | null>(null);
 
   if (isLoading) {
     return (
@@ -78,6 +85,19 @@ export default function PurchaseDetailPage() {
     } catch (err: any) {
       toast.error(
         err?.response?.data?.error?.message ?? "Hủy thất bại",
+      );
+    }
+  };
+
+  const handleDeleteItem = async () => {
+    if (!deleteItemId) return;
+    try {
+      await deleteItemMut.mutateAsync(deleteItemId);
+      toast.success("Đã xóa mục");
+      setDeleteItemId(null);
+    } catch (err: any) {
+      toast.error(
+        err?.response?.data?.error?.message ?? "Xóa mục thất bại",
       );
     }
   };
@@ -160,28 +180,56 @@ export default function PurchaseDetailPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Loại</TableHead>
-                  <TableHead>Danh mục</TableHead>
+                  <TableHead>Mô tả</TableHead>
                   <TableHead>Model</TableHead>
                   <TableHead>Serial</TableHead>
-                  <TableHead className="text-right">Giá mua</TableHead>
+                  <TableHead className="text-right">SL</TableHead>
+                  <TableHead className="text-right">Đơn giá</TableHead>
+                  <TableHead className="text-right">Thành tiền</TableHead>
+                  {isDraft && <TableHead className="text-right">Thao tác</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {data.items.map((it) => (
                   <TableRow key={it.id}>
                     <TableCell>
-                      {PURCHASE_ITEM_TYPE_LABEL[it.type]}
+                      {PURCHASE_ITEM_TYPE_LABEL[it.itemType]}
                     </TableCell>
-                    <TableCell>
-                      {it.categoryCode
-                        ? COMPONENT_CATEGORY_LABEL[it.categoryCode]
-                        : "-"}
-                    </TableCell>
+                    <TableCell>{it.description}</TableCell>
                     <TableCell>{it.model ?? "-"}</TableCell>
                     <TableCell>{it.serial ?? "-"}</TableCell>
+                    <TableCell className="text-right">{it.quantity}</TableCell>
                     <TableCell className="text-right">
-                      {formatVnd(it.purchasePrice)}
+                      {formatVnd(it.unitPrice)}
                     </TableCell>
+                    <TableCell className="text-right">
+                      {formatVnd(it.totalPrice)}
+                    </TableCell>
+                    {isDraft && (
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-1">
+                          <Can permission={PERM.PURCHASE_UPDATE}>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setEditItem(it)}
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setDeleteItemId(it.id)}
+                              disabled={data.items.length <= 1}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </Can>
+                        </div>
+                      </TableCell>
+                    )}
                   </TableRow>
                 ))}
               </TableBody>
@@ -218,6 +266,24 @@ export default function PurchaseDetailPage() {
         destructive
         loading={cancelMut.isPending}
         onConfirm={handleCancel}
+      />
+
+      <EditPurchaseItemDialog
+        orderId={data.id}
+        item={editItem}
+        open={!!editItem}
+        onOpenChange={(open) => !open && setEditItem(null)}
+      />
+
+      <ConfirmDialog
+        open={!!deleteItemId}
+        onOpenChange={(open) => !open && setDeleteItemId(null)}
+        title="Xóa mục này?"
+        description="Máy/linh kiện đã sinh cho mục này (khi tạo phiếu) sẽ bị xóa theo."
+        confirmText="Xóa"
+        destructive
+        loading={deleteItemMut.isPending}
+        onConfirm={handleDeleteItem}
       />
     </div>
   );

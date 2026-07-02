@@ -19,6 +19,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { ComponentPicker } from "@/features/assembly/component-picker";
 import { useCreateAssembly } from "@/features/assembly/hooks";
+import { ComponentCategoryCode } from "@app/shared";
 import {
   AssemblyRole,
   type ComponentOption,
@@ -55,6 +56,20 @@ const CATEGORY_TO_ROLE: Record<string, AssemblyRole> = {
   PSU: AssemblyRole.PSU,
   CASE: AssemblyRole.CASE,
   FAN: AssemblyRole.FAN,
+};
+
+// Map ngược — role trong assembly → category linh kiện trong kho, để lọc picker.
+// AssemblyRole.OTHER không map → hiển thị tất cả.
+const ROLE_TO_CATEGORY: Partial<Record<AssemblyRole, ComponentCategoryCode>> = {
+  [AssemblyRole.CPU]: ComponentCategoryCode.CPU,
+  [AssemblyRole.MB]: ComponentCategoryCode.MB,
+  [AssemblyRole.RAM]: ComponentCategoryCode.RAM,
+  [AssemblyRole.SSD]: ComponentCategoryCode.SSD,
+  [AssemblyRole.HDD]: ComponentCategoryCode.HDD,
+  [AssemblyRole.GPU]: ComponentCategoryCode.GPU,
+  [AssemblyRole.PSU]: ComponentCategoryCode.PSU,
+  [AssemblyRole.CASE]: ComponentCategoryCode.CASE,
+  [AssemblyRole.FAN]: ComponentCategoryCode.FAN,
 };
 
 let uidSeq = 0;
@@ -200,6 +215,7 @@ export default function NewAssemblyPage() {
                     value={row.component}
                     excludeIds={selectedIds.filter((id) => id !== row.component?.id)}
                     onChange={(c) => updateRow(row.uid, { component: c })}
+                    categoryCode={ROLE_TO_CATEGORY[row.role]}
                   />
                 </div>
                 <div className="sm:col-span-3">

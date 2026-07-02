@@ -20,6 +20,10 @@ export interface SaleListItem {
   code: string;
   status: SalesOrderStatus;
   customer?: { id: string; name: string; phone?: string | null } | null;
+  orderName?: string | null;
+  sellerName?: string | null;
+  platform?: string | null;
+  salesUrl?: string | null;
   totalAmount: number;
   revenue: number;
   cost: number;
@@ -83,12 +87,20 @@ export interface CreateSaleItemInput {
 
 export interface CreateSaleDto {
   customerId: string;
+  orderName?: string;
+  sellerName?: string;
+  platform?: string;
+  salesUrl?: string;
   notes?: string;
   items: CreateSaleItemInput[];
 }
 
 export interface UpdateSaleDto {
   customerId?: string;
+  orderName?: string;
+  sellerName?: string;
+  platform?: string;
+  salesUrl?: string;
   notes?: string;
   items?: CreateSaleItemInput[];
 }
@@ -175,12 +187,16 @@ interface PaginatedComponents {
   totalPages: number;
 }
 
-export async function searchSellableComponents(q: string): Promise<SellableComponent[]> {
+export async function searchSellableComponents(
+  q: string,
+  categoryCode?: ComponentCategoryCode,
+): Promise<SellableComponent[]> {
   const { data } = await apiClient.get("/components", {
     params: {
       search: q,
       pageSize: 50,
       status: ComponentStatus.IN_STOCK,
+      categoryCode,
     },
   });
   const payload = unwrap<PaginatedComponents>(data);

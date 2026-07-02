@@ -19,15 +19,16 @@ export interface PurchaseListItem {
 
 export interface PurchaseItem {
   id: string;
-  type: PurchaseItemType;
+  itemType: PurchaseItemType;
+  description: string;
   categoryCode?: ComponentCategoryCode | null;
   model?: string | null;
   serial?: string | null;
-  purchasePrice: number;
-  quantity?: number;
+  quantity: number;
+  unitPrice: number;
+  totalPrice: number;
   notes?: string | null;
-  machineId?: string | null;
-  componentId?: string | null;
+  machines?: Array<{ id: string; code: string; serial?: string | null }>;
 }
 
 export interface PurchaseDetail extends PurchaseListItem {
@@ -51,8 +52,21 @@ export interface PurchaseListQuery {
 export interface CreatePurchaseItemInput {
   itemType: PurchaseItemType;
   description: string;
+  model?: string;
+  serial?: string;
   quantity: number;
   unitPrice: number;
+  categoryCode?: ComponentCategoryCode;
+  notes?: string;
+}
+
+export interface UpdatePurchaseItemInput {
+  itemType?: PurchaseItemType;
+  description?: string;
+  model?: string;
+  serial?: string;
+  quantity?: number;
+  unitPrice?: number;
   categoryCode?: ComponentCategoryCode;
   notes?: string;
 }
@@ -125,6 +139,25 @@ export async function confirmPurchase(id: string): Promise<PurchaseDetail> {
 export async function cancelPurchase(id: string): Promise<PurchaseDetail> {
   const { data } = await apiClient.post(`/purchases/${id}/cancel`);
   return unwrap<PurchaseDetail>(data);
+}
+
+export async function updatePurchaseItem(
+  orderId: string,
+  itemId: string,
+  payload: UpdatePurchaseItemInput,
+): Promise<PurchaseItem> {
+  const { data } = await apiClient.patch(
+    `/purchases/${orderId}/items/${itemId}`,
+    payload,
+  );
+  return unwrap<PurchaseItem>(data);
+}
+
+export async function deletePurchaseItem(
+  orderId: string,
+  itemId: string,
+): Promise<void> {
+  await apiClient.delete(`/purchases/${orderId}/items/${itemId}`);
 }
 
 export interface SupplierOption {

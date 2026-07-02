@@ -51,6 +51,7 @@ const PERMISSIONS: string[] = [
   "purchase:cancel",
 
   "machine:view",
+  "machine:update",
   "machine:inspect",
   "machine:allocate_cost",
   "machine:disassemble",
@@ -109,7 +110,7 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     "supplier:view", "supplier:create", "supplier:update",
     "customer:view", "customer:create", "customer:update",
     "purchase:view", "purchase:create", "purchase:update", "purchase:confirm", "purchase:cancel",
-    "machine:view", "machine:inspect", "machine:allocate_cost", "machine:disassemble", "machine:mark_ready",
+    "machine:view", "machine:update", "machine:inspect", "machine:allocate_cost", "machine:disassemble", "machine:mark_ready",
     "component:view", "component:update",
     "inventory:view", "inventory:adjust",
     "assembly:view", "assembly:create", "assembly:update", "assembly:complete", "assembly:cancel",
@@ -136,7 +137,7 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
 
   TECHNICIAN: [
     "dashboard:view",
-    "machine:view", "machine:inspect", "machine:allocate_cost", "machine:disassemble", "machine:mark_ready",
+    "machine:view", "machine:update", "machine:inspect", "machine:allocate_cost", "machine:disassemble", "machine:mark_ready",
     "component:view", "component:update",
     "assembly:view", "assembly:create", "assembly:update", "assembly:complete", "assembly:cancel",
     "finished_pc:view", "finished_pc:update",

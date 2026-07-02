@@ -122,6 +122,11 @@ enum SupplierCategory {
   RETAIL
 }
 
+enum MasterOptionType {
+  SELLER
+  SALES_PLATFORM
+}
+
 // ============================================================================
 // AUTH & RBAC
 // ============================================================================
@@ -305,6 +310,8 @@ model PurchaseItem {
   purchaseOrderId String           @map("purchase_order_id")
   itemType        PurchaseItemType @map("item_type")
   description     String
+  model           String?
+  serial          String?
   quantity        Int              @default(1)
   unitPrice       Decimal          @map("unit_price") @db.Decimal(18, 2)
   totalPrice      Decimal          @map("total_price") @db.Decimal(18, 2)
@@ -561,6 +568,10 @@ model FinishedPcComponent {
 model SalesOrder {
   id          String           @id @default(cuid())
   code        String           @unique
+  orderName   String?          @map("order_name")
+  sellerName  String?          @map("seller_name")
+  platform    String?
+  salesUrl    String?          @map("sales_url")
   customerId  String?          @map("customer_id")
   status      SalesOrderStatus @default(DRAFT)
   totalAmount Decimal          @default(0) @map("total_amount") @db.Decimal(18, 2)
@@ -724,6 +735,22 @@ model Expense {
   @@index([tenantId])
   @@index([branchId])
   @@map("expenses")
+}
+
+// Master data dùng chung cho dropdown (Người bán, Nền tảng bán, ...).
+// Không dùng bảng riêng để tránh tăng số model — thêm loại mới chỉ cần enum.
+model MasterOption {
+  id        String           @id @default(cuid())
+  type      MasterOptionType
+  name      String
+  notes     String?
+  tenantId  String?          @map("tenant_id")
+  createdAt DateTime         @default(now()) @map("created_at")
+  updatedAt DateTime         @updatedAt @map("updated_at")
+
+  @@unique([type, tenantId, name])
+  @@index([type])
+  @@map("master_options")
 }
 
 // Attachment schema follows ARCHITECTURE.md section 16.

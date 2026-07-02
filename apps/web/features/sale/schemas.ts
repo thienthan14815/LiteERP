@@ -18,7 +18,11 @@ export const saleItemSchema = z
   );
 
 export const createSaleSchema = z.object({
-  customerId: z.string().min(1, "Vui lòng chọn khách hàng"),
+  customerId: z.string().min(1, "Vui lòng chọn người mua"),
+  orderName: z.string().optional(),
+  sellerName: z.string().optional(),
+  platform: z.string().optional(),
+  salesUrl: z.string().url("URL không hợp lệ").optional().or(z.literal("")),
   notes: z.string().optional(),
   items: z.array(saleItemSchema).min(1, "Cần ít nhất 1 mục bán"),
 });

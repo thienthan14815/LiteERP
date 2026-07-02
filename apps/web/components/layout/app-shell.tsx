@@ -15,7 +15,6 @@ import {
   ShieldCheck,
   BarChart3,
   Wallet,
-  FolderTree,
   Settings,
   History,
   Menu,
@@ -63,7 +62,6 @@ const NAV: NavItem[] = [
   { href: "/warranties", labelKey: "nav.warranty", icon: ShieldCheck, permission: PERM.WARRANTY_VIEW, hasChevron: true },
   { href: "/reports", labelKey: "nav.report", icon: BarChart3, permission: PERM.REPORT_VIEW, hasChevron: true },
   { href: "/dashboard", labelKey: "nav.expense", icon: Wallet, permission: PERM.DASHBOARD_VIEW },
-  { href: "/settings/categories", labelKey: "nav.category", icon: FolderTree, permission: PERM.SETTING_VIEW },
   { href: "/settings", labelKey: "nav.setting", icon: Settings },
   { href: "/audit-logs", labelKey: "nav.audit", icon: History },
 ];

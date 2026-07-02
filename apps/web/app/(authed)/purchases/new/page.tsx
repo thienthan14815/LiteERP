@@ -44,6 +44,8 @@ const itemSchema = z
     itemType: z.nativeEnum(PurchaseItemType),
     categoryCode: z.nativeEnum(ComponentCategoryCode).optional(),
     description: z.string().min(1, "Vui lòng nhập mô tả"),
+    model: z.string().optional(),
+    serial: z.string().optional(),
     quantity: z.coerce.number().int().min(1, "Số lượng tối thiểu 1"),
     unitPrice: z.coerce.number().nonnegative("Đơn giá phải >= 0"),
     notes: z.string().optional(),
@@ -76,6 +78,8 @@ export default function NewPurchasePage() {
         {
           itemType: PurchaseItemType.MACHINE,
           description: "",
+          model: "",
+          serial: "",
           quantity: 1,
           unitPrice: 0,
           notes: "",
@@ -98,6 +102,8 @@ export default function NewPurchasePage() {
         items: values.items.map((it) => ({
           itemType: it.itemType,
           description: it.description,
+          model: it.model?.trim() ? it.model.trim() : undefined,
+          serial: it.serial?.trim() ? it.serial.trim() : undefined,
           quantity: it.quantity,
           unitPrice: it.unitPrice,
           categoryCode:
@@ -182,6 +188,8 @@ export default function NewPurchasePage() {
                     append({
                       itemType: PurchaseItemType.MACHINE,
                       description: "",
+                      model: "",
+                      serial: "",
                       quantity: 1,
                       unitPrice: 0,
                       notes: "",
@@ -312,6 +320,39 @@ export default function NewPurchasePage() {
                         )}
                       </div>
                     </FormItem>
+                    <FormField
+                      control={form.control}
+                      name={`items.${idx}.model`}
+                      render={({ field }) => (
+                        <FormItem className="sm:col-span-6">
+                          <FormLabel>Model</FormLabel>
+                          <FormControl>
+                            <Input placeholder="VD: 7050 MFF" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name={`items.${idx}.serial`}
+                      render={({ field }) => (
+                        <FormItem className="sm:col-span-6">
+                          <FormLabel>Serial</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder={
+                                Number(form.watch(`items.${idx}.quantity`)) > 1
+                                  ? "Nhập trên từng máy sau khi tách"
+                                  : "VD: SN123456"
+                              }
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
                     <FormField
                       control={form.control}
                       name={`items.${idx}.notes`}

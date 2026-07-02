@@ -81,8 +81,8 @@ export default function SaleDetailPage() {
   return (
     <div>
       <PageHeader
-        title={`Đơn bán ${data.code}`}
-        description={`Tạo lúc ${formatDateTime(data.createdAt)}`}
+        title={data.orderName || `Đơn bán ${data.code}`}
+        description={`${data.code} · Tạo lúc ${formatDateTime(data.createdAt)}`}
         actions={
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => router.push("/sales")}>
@@ -106,12 +106,40 @@ export default function SaleDetailPage() {
 
       <div className="mb-4 grid gap-4 lg:grid-cols-3">
         <Card>
-          <CardHeader><CardTitle>Khách hàng</CardTitle></CardHeader>
+          <CardHeader><CardTitle>Người mua</CardTitle></CardHeader>
           <CardContent className="space-y-2 text-sm">
             <div className="font-medium">{data.customer?.name ?? "-"}</div>
             <div className="text-muted-foreground">{data.customer?.phone ?? "-"}</div>
             <div className="text-muted-foreground">{data.customer?.email ?? "-"}</div>
             <div className="text-muted-foreground">{data.customer?.code ?? ""}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle>Kênh bán</CardTitle></CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Người bán</span>
+              <span>{data.sellerName ?? "-"}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Nền tảng</span>
+              <span>{data.platform ?? "-"}</span>
+            </div>
+            <div>
+              <span className="text-muted-foreground">URL bán hàng</span>
+              <div className="mt-1 break-all">
+                {data.salesUrl ? (
+                  <a
+                    href={data.salesUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline"
+                  >
+                    {data.salesUrl}
+                  </a>
+                ) : "-"}
+              </div>
+            </div>
           </CardContent>
         </Card>
         <Card>
@@ -201,7 +229,7 @@ export default function SaleDetailPage() {
                     {it.component
                       ? `${COMPONENT_CATEGORY_LABEL[it.component.category.code]} · ${it.component.model ?? "-"} · ${it.component.serialNumber ?? "-"}`
                       : it.finishedPc
-                        ? `Máy thành phẩm`
+                        ? `Máy tính`
                         : "-"}
                   </TableCell>
                   <TableCell className="text-right">{it.quantity}</TableCell>

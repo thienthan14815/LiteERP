@@ -5,10 +5,13 @@ import {
   cancelPurchase,
   confirmPurchase,
   createPurchase,
+  deletePurchaseItem,
   getPurchase,
   listPurchases,
+  updatePurchaseItem,
   type CreatePurchaseDto,
   type PurchaseListQuery,
+  type UpdatePurchaseItemInput,
 } from "./api";
 
 export const purchaseKeys = {
@@ -60,6 +63,29 @@ export function useCancelPurchase() {
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: purchaseKeys.all });
       qc.invalidateQueries({ queryKey: purchaseKeys.detail(data.id) });
+    },
+  });
+}
+
+export function useUpdatePurchaseItem(orderId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (params: { itemId: string; payload: UpdatePurchaseItemInput }) =>
+      updatePurchaseItem(orderId, params.itemId, params.payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: purchaseKeys.detail(orderId) });
+      qc.invalidateQueries({ queryKey: purchaseKeys.all });
+    },
+  });
+}
+
+export function useDeletePurchaseItem(orderId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (itemId: string) => deletePurchaseItem(orderId, itemId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: purchaseKeys.detail(orderId) });
+      qc.invalidateQueries({ queryKey: purchaseKeys.all });
     },
   });
 }

@@ -104,6 +104,22 @@ export class DriveService {
     }
     const reportedSize = res.data.size ? Number(res.data.size) : buffer.byteLength;
 
+    // File ảnh/attachment cần public-with-link để `<img src=thumbnailUrl>` load
+    // được trực tiếp từ trình duyệt (Drive mặc định là private → thumbnail
+    // trả placeholder). Backup KHÔNG public — chỉ chủ Drive xem được.
+    if (folder !== DriveFolder.BACKUP) {
+      try {
+        await drive.permissions.create({
+          fileId: driveFileId,
+          requestBody: { role: "reader", type: "anyone" },
+        });
+      } catch (err) {
+        this.logger.warn(
+          `Không set được permission public cho ${driveFileId}: ${(err as Error).message}. Thumbnail có thể không load.`,
+        );
+      }
+    }
+
     return {
       driveFileId,
       thumbnailUrl: this.getThumbnailUrl(driveFileId),

@@ -40,7 +40,7 @@ const STATUS_OPTIONS: Array<{ value: FinishedPcStatus | "ALL"; label: string }> 
 ];
 
 export default function FinishedPcsListPage() {
-  usePageMeta("Máy thành phẩm", "PC sau lắp ráp");
+  usePageMeta("Máy tính", "PC đã lắp ráp xong, sẵn sàng lên kệ / đã bán");
   const [page, setPage] = React.useState(1);
   const [pageSize] = React.useState(20);
   const [status, setStatus] = React.useState<FinishedPcStatus | "ALL">("ALL");
@@ -56,8 +56,8 @@ export default function FinishedPcsListPage() {
   return (
     <div>
       <PageHeader
-        title="Máy thành phẩm"
-        description="Danh sách máy đã lắp ráp và bán"
+        title="Máy tính"
+        description="Máy đã lắp ráp xong, sẵn sàng lên kệ / đã bán"
       />
 
       <Card className="mb-4">

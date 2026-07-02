@@ -34,6 +34,18 @@ export class CreateSaleDto {
   customerId!: string;
 
   @IsOptional() @IsString()
+  orderName?: string;
+
+  @IsOptional() @IsString()
+  sellerName?: string;
+
+  @IsOptional() @IsString()
+  platform?: string;
+
+  @IsOptional() @IsString()
+  salesUrl?: string;
+
+  @IsOptional() @IsString()
   notes?: string;
 
   @IsArray()

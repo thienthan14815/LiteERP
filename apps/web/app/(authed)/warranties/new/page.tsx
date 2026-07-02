@@ -91,7 +91,7 @@ export default function NewWarrantyPage() {
                   checked={target === "FINISHED_PC"}
                   onChange={() => setTarget("FINISHED_PC")}
                 />
-                Máy thành phẩm
+                Máy tính
               </label>
               <label className="flex cursor-pointer items-center gap-2 text-sm">
                 <input

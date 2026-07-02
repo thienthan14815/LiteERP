@@ -78,7 +78,14 @@ export async function uploadToDrive(payload: {
 
 export async function listAttachments(relatedType: string, relatedId: string): Promise<Attachment[]> {
   const { data } = await apiClient.get("/attachments", { params: { relatedType, relatedId } });
-  return unwrap<Attachment[]>(data);
+  const payload = unwrap<DriveAttachmentResponse[] | Attachment[]>(data);
+  // Backend giờ trả shape { filename, sizeBytes, entityType, entityId, thumbnailUrl, previewUrl }.
+  // Cần adapter về `Attachment` legacy để UI (fileName/size/relatedType) work.
+  return (payload as any[]).map((row) => {
+    // Nếu row đã có sẵn `fileName` (bản ghi cũ hoặc backend chưa update) → giữ nguyên
+    if (row.fileName) return row as Attachment;
+    return toLegacyShape(row as DriveAttachmentResponse);
+  });
 }
 
 export async function downloadUrl(id: string): Promise<{ url: string; fileName: string; mimeType: string }> {

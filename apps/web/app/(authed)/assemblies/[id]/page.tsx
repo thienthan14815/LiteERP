@@ -181,7 +181,7 @@ export default function AssemblyDetailPage() {
             )}
             {finishedPc && (
               <div className="border-t pt-2">
-                <span className="text-muted-foreground">Máy thành phẩm</span>
+                <span className="text-muted-foreground">Máy tính</span>
                 <div className="mt-1 flex items-center justify-between">
                   <Link
                     href={`/finished-pcs/${finishedPc.id}`}
@@ -198,7 +198,7 @@ export default function AssemblyDetailPage() {
             )}
             {canEdit && !finishedPc && (
               <div className="border-t pt-2">
-                <span className="text-muted-foreground">Máy thành phẩm dự kiến</span>
+                <span className="text-muted-foreground">Máy tính dự kiến</span>
                 <div className="mt-1 font-medium">
                   {formatVnd(data.draftPcPreview.costPrice)}
                 </div>

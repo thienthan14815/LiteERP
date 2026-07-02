@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Check, ChevronsUpDown, Loader2 } from "lucide-react";
+import { ComponentCategoryCode } from "@app/shared";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -28,15 +29,23 @@ interface Props {
   value?: SellableComponent | null;
   onChange: (c: SellableComponent | null) => void;
   excludeIds?: string[];
+  // Lọc theo category (tương tự picker ở lắp ráp).
+  categoryCode?: ComponentCategoryCode;
 }
 
-export function SellableComponentCombobox({ value, onChange, excludeIds = [] }: Props) {
+export function SellableComponentCombobox({
+  value,
+  onChange,
+  excludeIds = [],
+  categoryCode,
+}: Props) {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
 
   const { data: results = [], isFetching } = useQuery({
-    queryKey: ["components", "sellable-search", query],
-    queryFn: () => searchSellableComponents(query),
+    // categoryCode nằm trong queryKey → tự refetch khi user đổi Loại.
+    queryKey: ["components", "sellable-search", query, categoryCode ?? "ALL"],
+    queryFn: () => searchSellableComponents(query, categoryCode),
     staleTime: 15_000,
   });
 

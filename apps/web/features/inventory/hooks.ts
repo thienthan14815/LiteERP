@@ -14,11 +14,13 @@ import {
   listStockTransactions,
   markMachineReadyForSale,
   scrapComponent,
+  updateMachine,
   type AllocateCostDto,
   type ComponentListQuery,
   type InspectMachineDto,
   type MachineListQuery,
   type StockTxnListQuery,
+  type UpdateMachineDto,
 } from "./api";
 
 export const machineKeys = {
@@ -92,6 +94,17 @@ export function useMarkMachineReady(id: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => markMachineReadyForSale(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: machineKeys.all });
+      qc.invalidateQueries({ queryKey: machineKeys.detail(id) });
+    },
+  });
+}
+
+export function useUpdateMachine(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: UpdateMachineDto) => updateMachine(id, payload),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: machineKeys.all });
       qc.invalidateQueries({ queryKey: machineKeys.detail(id) });

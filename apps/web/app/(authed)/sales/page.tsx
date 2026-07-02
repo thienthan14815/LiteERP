@@ -136,7 +136,9 @@ export default function SalesListPage() {
                 <TableRow>
                   <TableHead>Mã</TableHead>
                   <TableHead>Ngày</TableHead>
-                  <TableHead>Khách hàng</TableHead>
+                  <TableHead>Tên</TableHead>
+                  <TableHead>Người mua</TableHead>
+                  <TableHead>Nền tảng</TableHead>
                   <TableHead className="text-right">Tổng tiền</TableHead>
                   <TableHead className="text-right">Lợi nhuận</TableHead>
                   <TableHead>Trạng thái</TableHead>
@@ -148,7 +150,9 @@ export default function SalesListPage() {
                   <TableRow key={row.id}>
                     <TableCell className="font-medium">{row.code}</TableCell>
                     <TableCell>{formatDate(row.createdAt)}</TableCell>
+                    <TableCell className="max-w-[220px] truncate">{row.orderName ?? "-"}</TableCell>
                     <TableCell>{row.customer?.name ?? "-"}</TableCell>
+                    <TableCell>{row.platform ?? "-"}</TableCell>
                     <TableCell className="text-right">{formatVnd(row.totalAmount)}</TableCell>
                     <TableCell className="text-right">
                       {row.status === SalesOrderStatus.CONFIRMED ? formatVnd(row.profit) : "-"}
