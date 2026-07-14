@@ -9,9 +9,10 @@ build/
 out/
 *.tsbuildinfo
 
-# Prisma
-**/prisma/.cache/
-**/prisma/migrations/dev.db*
+# SQLite (on-device DB lives under apps/api/data; never commit DB files)
+**/data/*.sqlite
+**/data/*.sqlite-*
+**/*.sqlite-journal
 
 # Env files
 .env
@@ -46,7 +47,11 @@ docker/volumes/
 # Uploads (local dev)
 uploads/
 tmp/
-pnpm-lock.yaml
+# NOTE: pnpm-lock.yaml is intentionally COMMITTED (reproducible installs +
+# --frozen-lockfile in CI/APK build). Do not add it here.
+
+# Payload zip nhúng vào APK (~295 MB — build lại từ payload/ bằng scripts/build-payload.sh)
+payload.zip
 
 # Capacitor / Android
 android/.gradle/

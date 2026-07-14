@@ -2,9 +2,10 @@ import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 import { APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
 import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
+import { resolve } from "node:path";
 
 import { typedConfig } from "./config/configuration";
-import { PrismaModule } from "./database/prisma.module";
+import { DbModule } from "./database/db.module";
 import { QueueModule } from "./jobs/queue.module";
 import { RepositoryModule } from "./repository/repository.module";
 import { DriveModule } from "./modules/drive/drive.module";
@@ -38,9 +39,18 @@ import { HealthModule } from "./modules/health/health.module";
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true, load: [typedConfig] }),
+    // envFilePath theo vị trí code thay vì cwd: trên Android, Node khởi động
+    // với cwd="/" nên dotenv mặc định không tìm thấy .env của payload
+    // (Drive credentials nằm ở <apiRoot>/.env). Biến đã có sẵn trong
+    // process.env (DATABASE_URL, PORT… do shell Android set) luôn thắng —
+    // dotenv không override.
+    ConfigModule.forRoot({
+      isGlobal: true,
+      load: [typedConfig],
+      envFilePath: [resolve(__dirname, "../../.env"), ".env"],
+    }),
     ThrottlerModule.forRoot([{ name: "default", ttl: 60_000, limit: 100 }]),
-    PrismaModule,
+    DbModule,
     RepositoryModule,
     DriveModule,
     RequestContextModule,

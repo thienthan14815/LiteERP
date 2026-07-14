@@ -19,9 +19,17 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
 
+    // Correlation id assigned by the request-id middleware (main.ts). Included
+    // in the response AND in server logs so a user-reported error can be tied
+    // back to its stack trace.
+    const requestId = (request as { requestId?: string }).requestId;
+
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let code = "INTERNAL_SERVER_ERROR";
-    let message = "Internal server error";
+    // Default for unexpected/internal errors. Deliberately generic and in the
+    // app's UI language: users must never see raw error text or SQL. The real
+    // detail is logged server-side below, keyed by requestId.
+    let message = "Hệ thống gặp sự cố khi xử lý yêu cầu. Vui lòng thử lại sau.";
     let details: Record<string, unknown> = {};
 
     if (exception instanceof HttpException) {
@@ -44,10 +52,18 @@ export class HttpExceptionFilter implements ExceptionFilter {
         }
       }
     } else if (exception instanceof Error) {
-      message = exception.message;
-      this.logger.error(exception.stack);
+      // Unexpected internal error (e.g. a DB driver "Failed query" failure).
+      // NEVER surface the raw message/SQL to the client — keep the generic
+      // `message` above and log the full detail (incl. any wrapped cause) so a
+      // user-reported error can be traced by its requestId.
+      const cause = (exception as { cause?: unknown }).cause;
+      this.logger.error(
+        `[${requestId ?? "-"}] ${exception.message}` +
+          (cause ? `\ncause: ${cause instanceof Error ? cause.stack : String(cause)}` : "") +
+          `\n${exception.stack}`,
+      );
     } else {
-      this.logger.error(`Unknown exception: ${JSON.stringify(exception)}`);
+      this.logger.error(`[${requestId ?? "-"}] Unknown exception: ${JSON.stringify(exception)}`);
     }
 
     response.status(status).json({
@@ -57,6 +73,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
         message,
         details,
       },
+      requestId,
       path: request.url,
       timestamp: new Date().toISOString(),
     });

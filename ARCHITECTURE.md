@@ -1,5 +1,13 @@
 # ARCHITECTURE.md
 
+> ⚠️ **LEGACY / REFERENCE ONLY.** This document describes the original online,
+> multi-user server topology (NestJS + PostgreSQL + Redis + BullMQ + S3/MinIO +
+> Docker/Nginx). The project has since pivoted to a **single standalone Android
+> APK** with an on-device NestJS server over **SQLite** (see
+> `ARCHITECTURE_forSQL.md` and `README.md`). Redis/BullMQ/Postgres/S3 and Docker
+> Compose are no longer part of the shipped app. Read this only for historical
+> context or if you intend to run the legacy server stack.
+
 # Computer Refurbishment & Inventory Management System Architecture
 
 > Kiến trúc hệ thống webapp quản lý mua bán máy tính cũ, tháo linh kiện, kho linh kiện, lắp ráp máy, bán hàng và bảo hành.

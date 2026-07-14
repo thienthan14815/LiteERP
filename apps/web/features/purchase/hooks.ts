@@ -5,6 +5,7 @@ import {
   cancelPurchase,
   confirmPurchase,
   createPurchase,
+  deletePurchase,
   deletePurchaseItem,
   getPurchase,
   listPurchases,
@@ -63,6 +64,16 @@ export function useCancelPurchase() {
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: purchaseKeys.all });
       qc.invalidateQueries({ queryKey: purchaseKeys.detail(data.id) });
+    },
+  });
+}
+
+export function useDeletePurchase() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => deletePurchase(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: purchaseKeys.all });
     },
   });
 }

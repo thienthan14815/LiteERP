@@ -5,6 +5,7 @@ export interface RequestContext {
   userId?: string;
   ip?: string;
   userAgent?: string;
+  requestId?: string;
 }
 
 @Injectable()
@@ -29,5 +30,9 @@ export class RequestContextService {
 
   getUserAgent(): string | undefined {
     return this.als.getStore()?.userAgent;
+  }
+
+  getRequestId(): string | undefined {
+    return this.als.getStore()?.requestId;
   }
 }

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import { MachinesService } from "./machines.service";
 import { QueryMachineDto } from "./dto/query-machine.dto";
 import { InspectMachineDto } from "./dto/inspect-machine.dto";
@@ -39,5 +39,10 @@ export class MachinesController {
   @Post(":id/mark-ready-for-sale") @Permissions("machine:mark_ready")
   ready(@Param("id") id: string) {
     return this.svc.markReadyForSale(id);
+  }
+
+  @Delete(":id") @Permissions("machine:update")
+  remove(@Param("id") id: string) {
+    return this.svc.remove(id);
   }
 }

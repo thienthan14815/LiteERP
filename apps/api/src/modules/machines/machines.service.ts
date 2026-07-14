@@ -1,13 +1,32 @@
 import { HttpStatus, Injectable, NotFoundException } from "@nestjs/common";
+import { and, asc, desc, eq, inArray, like, ne, or, sql, type SQL } from "drizzle-orm";
 import {
   ComponentStatus,
+  FinishedPcStatus,
   MachineStatus,
-  Prisma,
   StockTxnType,
-} from "@prisma/client";
-import { PrismaService } from "../../database/prisma.service";
+} from "@app/shared";
+import { DbService } from "../../database/db.service";
+import {
+  attachments,
+  componentCategories,
+  components,
+  finishedPcs,
+  machineComponents,
+  machines,
+  purchaseItems,
+  salesItems,
+} from "../../database/schema";
+import {
+  buildWholeMachineNotes,
+  collapseMachineSlots,
+  wholeMachineLikePattern,
+} from "../../common/utils/machine-link.util";
+import { DriveService } from "../drive/drive.service";
+import { createId } from "../../database/id";
 import { CodeGeneratorService } from "../../common/utils/code-generator.service";
 import { AuditLogService } from "../audit-logs/audit-logs.service";
+import { AttachmentsService } from "../attachments/attachments.service";
 import { StockTransactionService } from "../inventory/stock-transaction.service";
 import { BusinessError } from "../../common/exceptions/business.exception";
 import { RequestContextService } from "../../common/context/request-context.service";
@@ -20,56 +39,167 @@ import { UpdateMachineDto } from "./dto/update-machine.dto";
 @Injectable()
 export class MachinesService {
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly dbs: DbService,
     private readonly codes: CodeGeneratorService,
     private readonly audit: AuditLogService,
     private readonly stock: StockTransactionService,
     private readonly ctx: RequestContextService,
+    private readonly attachments: AttachmentsService,
+    private readonly drive: DriveService,
   ) {}
 
   async list(q: QueryMachineDto) {
-    const where: Prisma.MachineWhereInput = {};
-    if (q.status) where.status = q.status;
-    if (q.serial) where.serial = { contains: q.serial, mode: "insensitive" };
+    const conds: SQL[] = [];
+    if (q.status) conds.push(eq(machines.status, q.status));
+    if (q.serial) conds.push(like(machines.serial, `%${q.serial}%`));
     if (q.search) {
-      where.OR = [
-        { code: { contains: q.search, mode: "insensitive" } },
-        { serial: { contains: q.search, mode: "insensitive" } },
-      ];
+      const searchCond = or(
+        like(machines.code, `%${q.search}%`),
+        like(machines.serial, `%${q.search}%`),
+      );
+      if (searchCond) conds.push(searchCond);
     }
+    const where = conds.length ? and(...conds) : undefined;
     const { take, skip } = buildPagination(q.page, q.pageSize);
-    const [items, total] = await this.prisma.$transaction([
-      this.prisma.machine.findMany({
-        where,
-        orderBy: { createdAt: "desc" },
-        include: { _count: { select: { machineComponents: true, sourcedComponents: true } } },
-        take,
-        skip,
-      }),
-      this.prisma.machine.count({ where }),
-    ]);
+    const db = this.dbs.db;
+    const rows = await db
+      .select()
+      .from(machines)
+      .where(where)
+      .orderBy(desc(machines.createdAt))
+      .limit(take)
+      .offset(skip);
+    const totalRows = await db
+      .select({ count: sql<number>`count(*)`.as("count") })
+      .from(machines)
+      .where(where);
+    const total = Number(totalRows[0]?.count ?? 0);
+    // _count emulation: two grouped queries for the whole page.
+    const ids = rows.map((m) => m.id);
+    const mcCounts = ids.length
+      ? await db
+          .select({
+            refId: machineComponents.machineId,
+            count: sql<number>`count(*)`.as("count"),
+          })
+          .from(machineComponents)
+          .where(inArray(machineComponents.machineId, ids))
+          .groupBy(machineComponents.machineId)
+      : [];
+    const scCounts = ids.length
+      ? await db
+          .select({
+            refId: components.sourceMachineId,
+            count: sql<number>`count(*)`.as("count"),
+          })
+          .from(components)
+          .where(inArray(components.sourceMachineId, ids))
+          .groupBy(components.sourceMachineId)
+      : [];
+    const mcMap = new Map(mcCounts.map((c) => [c.refId, Number(c.count)]));
+    const scMap = new Map(scCounts.map((c) => [c.refId, Number(c.count)]));
+
+    // Miêu tả máy lấy từ purchase item gốc (bảng machines không có cột
+    // model/description) — hiển thị ở cột "Miêu tả" của danh sách.
+    const piIds = rows
+      .map((m) => m.purchaseItemId)
+      .filter((v): v is string => !!v);
+    const piById = new Map<string, { description: string; model: string | null }>();
+    if (piIds.length) {
+      const pis = await db
+        .select({
+          id: purchaseItems.id,
+          description: purchaseItems.description,
+          model: purchaseItems.model,
+        })
+        .from(purchaseItems)
+        .where(inArray(purchaseItems.id, piIds));
+      for (const p of pis) {
+        piById.set(p.id, { description: p.description, model: p.model });
+      }
+    }
+
+    // Ảnh đầu tiên (mimeType image/*) của mỗi máy — cột "Hình ảnh".
+    const thumbById = new Map<string, string>();
+    if (ids.length) {
+      const atts = await db
+        .select()
+        .from(attachments)
+        .where(
+          and(
+            eq(attachments.relatedType, "MACHINE"),
+            inArray(attachments.relatedId, ids),
+            like(attachments.mimeType, "image/%"),
+          ),
+        )
+        .orderBy(asc(attachments.createdAt));
+      for (const a of atts) {
+        if (!thumbById.has(a.relatedId) && a.driveFileId) {
+          thumbById.set(a.relatedId, this.drive.getThumbnailUrl(a.driveFileId));
+        }
+      }
+    }
+
     // Alias `cost` → `purchasePrice` để UI (page list + detail) khớp field name.
-    const projected = items.map((m) => ({ ...m, purchasePrice: Number(m.cost) }));
+    const projected = rows.map((m) => {
+      const pi = m.purchaseItemId ? piById.get(m.purchaseItemId) : undefined;
+      return {
+        ...m,
+        _count: {
+          machineComponents: mcMap.get(m.id) ?? 0,
+          sourcedComponents: scMap.get(m.id) ?? 0,
+        },
+        purchasePrice: Number(m.cost),
+        description: pi?.description ?? m.notes ?? null,
+        model: pi?.model ?? null,
+        thumbnailUrl: thumbById.get(m.id) ?? null,
+      };
+    });
     return paginate(projected, total, q.page ?? 1, q.pageSize ?? 20);
   }
 
   async get(id: string) {
-    const item = await this.prisma.machine.findUnique({
-      where: { id },
-      include: {
-        machineComponents: { include: { category: true, component: true } },
-        sourcedComponents: { include: { category: true } },
-        purchaseItem: { include: { purchaseOrder: true } },
+    const item = await this.dbs.db.query.machines.findFirst({
+      where: eq(machines.id, id),
+      with: {
+        machineComponents: { with: { category: true, component: true } },
+        sourcedComponents: { with: { category: true } },
+        purchaseItem: { with: { purchaseOrder: true } },
       },
     });
     if (!item) throw new NotFoundException({ code: "MACHINE_NOT_FOUND", message: "Machine not found" });
     // Alias `cost` → `purchasePrice` để khớp UI (schema dùng `cost` từ Phase 0,
     // nhưng UI + docs gọi là "giá mua").
-    return { ...item, purchasePrice: Number(item.cost) };
+    //
+    // UI đọc `inspection.slots` (kết quả bước Kiểm tra) và `components`
+    // (linh kiện thật đã tháo vào kho) — project từ machineComponents /
+    // sourcedComponents. Dòng giống hệt nhau gộp thành slot có `quantity`.
+    const slots = collapseMachineSlots(item.machineComponents);
+    return {
+      ...item,
+      purchasePrice: Number(item.cost),
+      inspection: slots.length
+        ? { inspectedAt: item.inspectedAt, slots }
+        : null,
+      components: item.sourcedComponents.map((c) => ({
+        id: c.id,
+        code: c.code,
+        categoryCode: c.category.code,
+        model: c.model,
+        serial: c.serialNumber,
+        status: c.status,
+        costPrice: Number(c.costPrice),
+      })),
+    };
   }
 
   async update(id: string, dto: UpdateMachineDto) {
-    const before = await this.prisma.machine.findUnique({ where: { id } });
+    const beforeRows = await this.dbs.db
+      .select()
+      .from(machines)
+      .where(eq(machines.id, id))
+      .limit(1);
+    const before = beforeRows[0];
     if (!before) {
       throw new NotFoundException({ code: "MACHINE_NOT_FOUND", message: "Machine not found" });
     }
@@ -81,12 +211,17 @@ export class MachinesService {
         HttpStatus.CONFLICT,
       );
     }
-    await this.prisma.$transaction(async (tx) => {
-      const data: Prisma.MachineUpdateInput = {};
+    await this.dbs.transaction(async (db) => {
+      const data: Partial<typeof machines.$inferInsert> = {};
       if (dto.serial !== undefined) data.serial = dto.serial.trim() || null;
       if (dto.notes !== undefined) data.notes = dto.notes.trim() || null;
       if (dto.purchasePrice !== undefined) data.cost = dto.purchasePrice;
-      const after = await tx.machine.update({ where: { id }, data });
+      const afterRows = await db
+        .update(machines)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(machines.id, id))
+        .returning();
+      const after = afterRows[0];
       await this.audit.record(
         {
           action: "machine.update",
@@ -95,18 +230,93 @@ export class MachinesService {
           before,
           after,
         },
-        tx,
+        db,
       );
     });
-    // Fetch sau khi tx đã commit — get() dùng this.prisma nên trước commit sẽ
-    // đọc snapshot cũ; phải gọi sau `await $transaction(...)`.
+    // Fetch sau khi tx đã commit — get() dùng this.dbs nên trước commit sẽ
+    // đọc snapshot cũ; phải gọi sau `await dbs.transaction(...)`.
     return this.get(id);
   }
 
+  /**
+   * Xóa hẳn máy — dùng khi nhập nhầm. Chặn khi máy đã bán/thanh lý hoặc đã
+   * tháo linh kiện nhập kho (components.sourceMachineId trỏ về nó). Bản ghi
+   * khảo sát machine_components xóa kèm (metadata của máy, không phải kho).
+   */
+  async remove(id: string) {
+    const before = await this.dbs.db.query.machines.findFirst({
+      where: eq(machines.id, id),
+    });
+    if (!before) throw new NotFoundException({ code: "MACHINE_NOT_FOUND", message: "Machine not found" });
+    if (before.status === MachineStatus.SOLD || before.status === MachineStatus.SCRAP) {
+      throw new BusinessError(
+        "MACHINE_IN_USE",
+        `Máy ${before.code} đã ${before.status === MachineStatus.SOLD ? "bán" : "thanh lý"} — không thể xóa`,
+        HttpStatus.CONFLICT,
+      );
+    }
+    const sourced = await this.dbs.db
+      .select({ id: components.id })
+      .from(components)
+      .where(eq(components.sourceMachineId, id))
+      .limit(1);
+    if (sourced[0]) {
+      throw new BusinessError(
+        "MACHINE_IN_USE",
+        `Máy ${before.code} đã tháo linh kiện nhập kho — xóa các linh kiện nguồn gốc từ máy này trước`,
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    // Máy đang lên kệ (bán nguyên máy) → gỡ luôn bản ghi PC thành phẩm đại
+    // diện, trừ khi nó đã nằm trong một đơn bán (kể cả nháp) — khi đó phải
+    // xử lý đơn bán trước để không để item trỏ vào bản ghi ma.
+    const listed = await this.dbs.db
+      .select({ id: finishedPcs.id, code: finishedPcs.code })
+      .from(finishedPcs)
+      .where(like(finishedPcs.notes, wholeMachineLikePattern(id)))
+      .limit(1);
+    if (listed[0]) {
+      const inSale = await this.dbs.db
+        .select({ id: salesItems.id })
+        .from(salesItems)
+        .where(eq(salesItems.finishedPcId, listed[0].id))
+        .limit(1);
+      if (inSale[0]) {
+        throw new BusinessError(
+          "MACHINE_IN_USE",
+          `Máy ${before.code} (mã lên kệ ${listed[0].code}) đang nằm trong đơn bán — hủy/xóa đơn bán trước`,
+          HttpStatus.CONFLICT,
+        );
+      }
+    }
+
+    await this.dbs.transaction(async (db) => {
+      if (listed[0]) {
+        await db
+          .delete(finishedPcs)
+          .where(
+            and(
+              eq(finishedPcs.id, listed[0].id),
+              ne(finishedPcs.status, FinishedPcStatus.SOLD),
+            ),
+          );
+      }
+      await db.delete(machineComponents).where(eq(machineComponents.machineId, id));
+      await db.delete(machines).where(eq(machines.id, id));
+      await this.audit.record(
+        { action: "machine.delete", entityType: "Machine", entityId: id, before },
+        db,
+      );
+    });
+    await this.attachments.deleteAllFor(["MACHINE"], id);
+    return { id, deleted: true };
+  }
+
   async inspect(id: string, dto: InspectMachineDto) {
-    const before = await this.prisma.machine.findUnique({
-      where: { id },
-      include: { machineComponents: true },
+    const before = await this.dbs.db.query.machines.findFirst({
+      where: eq(machines.id, id),
+      with: { machineComponents: true },
     });
     if (!before) throw new NotFoundException({ code: "MACHINE_NOT_FOUND", message: "Machine not found" });
     // Cho phép re-inspect khi máy đang ở NEW hoặc CHECKED (sửa kết quả kiểm tra).
@@ -122,57 +332,75 @@ export class MachinesService {
         HttpStatus.CONFLICT,
       );
     }
-    return this.prisma.$transaction(async (tx) => {
+    return this.dbs.transaction(async (db) => {
       // Wipe MachineComponent cũ để re-inspect ghi đè kết quả. Cần đảm bảo
       // KHÔNG có linh kiện nào đã link ra Component thật (tức đã tháo máy)
       // — check trên bằng status guard đã đảm bảo trạng thái CHECKED không có
       // componentId gắn (chỉ DISASSEMBLED mới có).
-      await tx.machineComponent.deleteMany({ where: { machineId: id } });
+      await db.delete(machineComponents).where(eq(machineComponents.machineId, id));
 
       for (const c of dto.components) {
-        const category = await tx.componentCategory.findUnique({ where: { code: c.categoryCode } });
+        // Số lượng: mỗi chiếc lưu 1 dòng machineComponents (không đổi schema —
+        // backup cũ/mới tương thích 2 chiều). get() gộp lại khi hiển thị.
+        // Serial trên dòng nhiều chiếc là thông tin tham khảo, ghi chung cho
+        // cả lô (VD: 4 thanh RAM cùng model — user không cần tách 4 dòng).
+        const qty = c.quantity && c.quantity > 0 ? Math.floor(c.quantity) : 1;
+        const categoryRows = await db
+          .select()
+          .from(componentCategories)
+          .where(eq(componentCategories.code, c.categoryCode))
+          .limit(1);
+        const category = categoryRows[0];
         if (!category) {
           throw new BusinessError(
             "COMPONENT_CATEGORY_NOT_FOUND",
             `Category ${c.categoryCode} not found`,
           );
         }
-        await tx.machineComponent.create({
-          data: {
+        for (let i = 0; i < qty; i++) {
+          await db.insert(machineComponents).values({
+            id: createId(),
             machineId: id,
             categoryId: category.id,
             model: c.model ?? null,
             serial: c.serial ?? null,
             condition: c.condition,
+            // Giá vốn ban đầu nhập ngay tại bước kiểm tra (đơn giá/chiếc).
+            allocatedCost: c.cost ?? 0,
             notes: c.notes ?? null,
-          },
-        });
+          });
+        }
       }
 
-      const after = await tx.machine.update({
-        where: { id },
-        data: {
+      const afterRows = await db
+        .update(machines)
+        .set({
           status: MachineStatus.CHECKED,
           inspectedAt: new Date(),
           notes: dto.notes ?? before.notes,
-        },
-      });
+          updatedAt: new Date(),
+        })
+        .where(eq(machines.id, id))
+        .returning();
+      const after = afterRows[0];
 
       await this.audit.record(
         { action: "machine.inspect", entityType: "Machine", entityId: id, before, after },
-        tx,
+        db,
       );
-      return tx.machine.findUniqueOrThrow({
-        where: { id },
-        include: { machineComponents: { include: { category: true } } },
+      const result = await db.query.machines.findFirst({
+        where: eq(machines.id, id),
+        with: { machineComponents: { with: { category: true } } },
       });
+      if (!result) throw new NotFoundException({ code: "MACHINE_NOT_FOUND", message: "Machine not found" });
+      return result;
     });
   }
 
   async allocateCost(id: string, dto: AllocateCostDto) {
-    const machine = await this.prisma.machine.findUnique({
-      where: { id },
-      include: { machineComponents: { include: { category: true } } },
+    const machine = await this.dbs.db.query.machines.findFirst({
+      where: eq(machines.id, id),
+      with: { machineComponents: { with: { category: true } } },
     });
     if (!machine) throw new NotFoundException({ code: "MACHINE_NOT_FOUND", message: "Machine not found" });
     if (machine.status !== MachineStatus.CHECKED) {
@@ -232,22 +460,22 @@ export class MachinesService {
       }
     }
 
-    await this.prisma.$transaction(async (tx) => {
+    await this.dbs.transaction(async (db) => {
       // Reset trước: các category KHÔNG có trong items → cost = 0.
       const allocatedCategories = new Set(dto.items.map((i) => i.categoryCode));
       for (const mc of machine.machineComponents) {
         if (!allocatedCategories.has(mc.category.code)) {
-          await tx.machineComponent.update({
-            where: { id: mc.id },
-            data: { allocatedCost: 0 },
-          });
+          await db
+            .update(machineComponents)
+            .set({ allocatedCost: 0, updatedAt: new Date() })
+            .where(eq(machineComponents.id, mc.id));
         }
       }
       for (const u of updates) {
-        await tx.machineComponent.update({
-          where: { id: u.id },
-          data: { allocatedCost: u.cost },
-        });
+        await db
+          .update(machineComponents)
+          .set({ allocatedCost: u.cost, updatedAt: new Date() })
+          .where(eq(machineComponents.id, u.id));
       }
       await this.audit.record(
         {
@@ -257,16 +485,16 @@ export class MachinesService {
           before: machine,
           after: { items: dto.items, totalAllocated, expected },
         },
-        tx,
+        db,
       );
     });
     return this.get(id);
   }
 
   async disassemble(id: string) {
-    const before = await this.prisma.machine.findUnique({
-      where: { id },
-      include: { machineComponents: { include: { category: true } } },
+    const before = await this.dbs.db.query.machines.findFirst({
+      where: eq(machines.id, id),
+      with: { machineComponents: { with: { category: true } } },
     });
     if (!before) throw new NotFoundException({ code: "MACHINE_NOT_FOUND", message: "Machine not found" });
     if (before.status !== MachineStatus.CHECKED) {
@@ -283,9 +511,14 @@ export class MachinesService {
       );
     }
     // Slot được coi là "rỗng" khi user chỉ chọn category mà không nhập
-    // model + serial + notes → không đại diện linh kiện thật → skip khi tháo.
+    // model + serial + notes VÀ chưa định giá → không đại diện linh kiện
+    // thật → skip khi tháo. Dòng đã có giá vốn (> 0) là linh kiện thật dù
+    // chưa rõ model.
     const isEmptySlot = (mc: (typeof before.machineComponents)[number]): boolean =>
-      !mc.model?.trim() && !mc.serial?.trim() && !mc.notes?.trim();
+      !mc.model?.trim() &&
+      !mc.serial?.trim() &&
+      !mc.notes?.trim() &&
+      Number(mc.allocatedCost) === 0;
     const eligible = before.machineComponents.filter((mc) => !isEmptySlot(mc));
     if (eligible.length === 0) {
       throw new BusinessError(
@@ -293,7 +526,7 @@ export class MachinesService {
         "Tất cả slot linh kiện đều rỗng (chưa nhập model/serial). Không có gì để xuất vào kho.",
       );
     }
-    return this.prisma.$transaction(async (tx) => {
+    return this.dbs.transaction(async (db) => {
       let created = 0;
       let skipped = 0;
       for (const mc of before.machineComponents) {
@@ -305,9 +538,11 @@ export class MachinesService {
           skipped++;
           continue; // Rule mới: slot rỗng → không xuất vào kho
         }
-        const compCode = await this.codes.next(mc.category.prefix, tx, 6);
-        const newComp = await tx.component.create({
-          data: {
+        const compCode = await this.codes.next(mc.category.prefix, db, 6);
+        const newCompRows = await db
+          .insert(components)
+          .values({
+            id: createId(),
             code: compCode,
             categoryId: mc.categoryId,
             status: ComponentStatus.IN_STOCK,
@@ -318,12 +553,13 @@ export class MachinesService {
             sourceMachineId: before.id,
             createdById: this.ctx.getUserId() ?? null,
             notes: mc.notes ?? null,
-          },
-        });
-        await tx.machineComponent.update({
-          where: { id: mc.id },
-          data: { componentId: newComp.id },
-        });
+          })
+          .returning();
+        const newComp = newCompRows[0];
+        await db
+          .update(machineComponents)
+          .set({ componentId: newComp.id, updatedAt: new Date() })
+          .where(eq(machineComponents.id, mc.id));
         await this.stock.create(
           {
             componentId: newComp.id,
@@ -332,14 +568,20 @@ export class MachinesService {
             refType: "MACHINE",
             refId: before.id,
           },
-          tx,
+          db,
         );
         created++;
       }
-      const after = await tx.machine.update({
-        where: { id },
-        data: { status: MachineStatus.DISASSEMBLED, disassembledAt: new Date() },
-      });
+      const afterRows = await db
+        .update(machines)
+        .set({
+          status: MachineStatus.DISASSEMBLED,
+          disassembledAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(machines.id, id))
+        .returning();
+      const after = afterRows[0];
       await this.audit.record(
         {
           action: "machine.disassemble",
@@ -348,35 +590,94 @@ export class MachinesService {
           before,
           after: { ...after, componentsCreated: created, slotsSkipped: skipped },
         },
-        tx,
+        db,
       );
-      return tx.machine.findUniqueOrThrow({
-        where: { id },
-        include: { sourcedComponents: true },
+      const result = await db.query.machines.findFirst({
+        where: eq(machines.id, id),
+        with: { sourcedComponents: true },
       });
+      if (!result) throw new NotFoundException({ code: "MACHINE_NOT_FOUND", message: "Machine not found" });
+      return result;
     });
   }
 
+  /**
+   * "Để nguyên — bán máy": ngoài việc đổi trạng thái máy, tạo một bản ghi
+   * FinishedPc (READY_FOR_SALE) đại diện máy nguyên chiếc — nhờ đó máy xuất
+   * hiện ở mục "PC thành phẩm / sẵn sàng lên kệ" và bán được qua luồng bán
+   * hàng bình thường (sales chỉ bán FINISHED_PC/COMPONENT, không bán Machine).
+   */
   async markReadyForSale(id: string) {
-    const before = await this.prisma.machine.findUnique({ where: { id } });
+    const beforeRows = await this.dbs.db
+      .select()
+      .from(machines)
+      .where(eq(machines.id, id))
+      .limit(1);
+    const before = beforeRows[0];
     if (!before) throw new NotFoundException({ code: "MACHINE_NOT_FOUND", message: "Machine not found" });
-    if (before.status !== MachineStatus.CHECKED) {
+    // CHECKED = luồng chuẩn. READY_FOR_SALE cũng được phép để tự-chữa những
+    // máy đã bấm nút trước bản vá này (đổi trạng thái nhưng chưa có bản ghi
+    // lên kệ) — guard bên dưới chặn tạo trùng.
+    if (
+      before.status !== MachineStatus.CHECKED &&
+      before.status !== MachineStatus.READY_FOR_SALE
+    ) {
       throw new BusinessError(
         "INVALID_STATUS_TRANSITION",
         `Cannot mark ready for sale from status ${before.status}`,
         HttpStatus.CONFLICT,
       );
     }
-    return this.prisma.$transaction(async (tx) => {
-      const after = await tx.machine.update({
-        where: { id },
-        data: { status: MachineStatus.READY_FOR_SALE },
-      });
-      await this.audit.record(
-        { action: "machine.ready_for_sale", entityType: "Machine", entityId: id, before, after },
-        tx,
+    const listed = await this.dbs.db
+      .select({ id: finishedPcs.id, code: finishedPcs.code })
+      .from(finishedPcs)
+      .where(like(finishedPcs.notes, wholeMachineLikePattern(id)))
+      .limit(1);
+    if (listed[0]) {
+      throw new BusinessError(
+        "MACHINE_ALREADY_LISTED",
+        `Máy ${before.code} đã lên kệ — mã PC thành phẩm ${listed[0].code} (mục "PC thành phẩm").`,
+        HttpStatus.CONFLICT,
       );
-      return after;
+    }
+    return this.dbs.transaction(async (db) => {
+      const pcCode = await this.codes.next("PC", db, 6);
+      const fpRows = await db
+        .insert(finishedPcs)
+        .values({
+          id: createId(),
+          code: pcCode,
+          assemblyOrderId: null,
+          status: FinishedPcStatus.READY_FOR_SALE,
+          // Giá vốn máy nguyên chiếc = giá mua + sửa chữa + vệ sinh.
+          costPrice:
+            Number(before.cost) +
+            Number(before.repairCost) +
+            Number(before.cleaningCost),
+          suggestedPrice: 0,
+          notes: buildWholeMachineNotes(before.code, before.id),
+          readyAt: new Date(),
+          createdById: this.ctx.getUserId() ?? null,
+        })
+        .returning();
+      const fp = fpRows[0];
+      const afterRows = await db
+        .update(machines)
+        .set({ status: MachineStatus.READY_FOR_SALE, updatedAt: new Date() })
+        .where(eq(machines.id, id))
+        .returning();
+      const after = afterRows[0];
+      await this.audit.record(
+        {
+          action: "machine.ready_for_sale",
+          entityType: "Machine",
+          entityId: id,
+          before,
+          after: { ...after, finishedPcId: fp.id, finishedPcCode: fp.code },
+        },
+        db,
+      );
+      return { ...after, finishedPc: { id: fp.id, code: fp.code } };
     });
   }
 }

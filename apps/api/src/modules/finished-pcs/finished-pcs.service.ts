@@ -2,10 +2,16 @@ import { HttpStatus, Injectable, NotFoundException } from "@nestjs/common";
 import {
   ComponentStatus,
   FinishedPcStatus,
-  Prisma,
   StockTxnType,
-} from "@prisma/client";
-import { PrismaService } from "../../database/prisma.service";
+} from "@app/shared";
+import { and, desc, eq, inArray, isNull, like, sql, type SQL } from "drizzle-orm";
+import { DbService } from "../../database/db.service";
+import { components, finishedPcs, finishedPcComponents, machines } from "../../database/schema";
+import {
+  collapseMachineSlots,
+  machineIdFromFinishedPcNotes,
+  type CollapsedMachineSlot,
+} from "../../common/utils/machine-link.util";
 import { AuditLogService } from "../audit-logs/audit-logs.service";
 import { StockTransactionService } from "../inventory/stock-transaction.service";
 import { BusinessError } from "../../common/exceptions/business.exception";
@@ -20,52 +26,66 @@ import {
 @Injectable()
 export class FinishedPcsService {
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly dbs: DbService,
     private readonly audit: AuditLogService,
     private readonly stock: StockTransactionService,
   ) {}
 
   async list(q: QueryFinishedPcDto) {
-    const where: Prisma.FinishedPcWhereInput = {};
-    if (q.status) where.status = q.status;
-    if (q.search) {
-      where.OR = [{ code: { contains: q.search, mode: "insensitive" } }];
-    }
+    const conds: SQL[] = [];
+    if (q.status) conds.push(eq(finishedPcs.status, q.status));
+    if (q.search) conds.push(like(finishedPcs.code, `%${q.search}%`));
+    const where = conds.length ? and(...conds) : undefined;
     const { take, skip } = buildPagination(q.page, q.pageSize);
-    const [items, total] = await this.prisma.$transaction([
-      this.prisma.finishedPc.findMany({
-        where,
-        include: {
-          _count: { select: { currentComponents: true } },
-          assemblyOrder: { select: { id: true, code: true } },
-        },
-        orderBy: { createdAt: "desc" },
-        take,
-        skip,
-      }),
-      this.prisma.finishedPc.count({ where }),
-    ]);
+    const db = this.dbs.db;
+    const items = await db.query.finishedPcs.findMany({
+      where,
+      with: {
+        assemblyOrder: { columns: { id: true, code: true } },
+      },
+      orderBy: [desc(finishedPcs.createdAt)],
+      limit: take,
+      offset: skip,
+    });
+    const totalRows = await db
+      .select({ count: sql<number>`count(*)`.as("count") })
+      .from(finishedPcs)
+      .where(where);
+    const total = Number(totalRows[0]?.count ?? 0);
+    // _count.currentComponents emulation: one grouped count over the page ids.
+    const ids = items.map((pc) => pc.id);
+    const counts = ids.length
+      ? await db
+          .select({
+            refId: components.currentFinishedPcId,
+            count: sql<number>`count(*)`.as("count"),
+          })
+          .from(components)
+          .where(inArray(components.currentFinishedPcId, ids))
+          .groupBy(components.currentFinishedPcId)
+      : [];
+    const countMap = new Map(counts.map((c) => [c.refId, Number(c.count)]));
     const projected = items.map((pc) => ({
       ...pc,
-      componentCount: pc._count.currentComponents,
+      componentCount: countMap.get(pc.id) ?? 0,
     }));
     return paginate(projected, total, q.page ?? 1, q.pageSize ?? 20);
   }
 
   async get(id: string) {
-    const item = await this.prisma.finishedPc.findUnique({
-      where: { id },
-      include: {
-        assemblyOrder: { select: { id: true, code: true, status: true } },
+    const item = await this.dbs.db.query.finishedPcs.findFirst({
+      where: eq(finishedPcs.id, id),
+      with: {
+        assemblyOrder: { columns: { id: true, code: true, status: true } },
         componentLinks: {
-          include: {
-            component: { include: { category: true } },
+          with: {
+            component: { with: { category: true } },
           },
-          orderBy: { installedAt: "desc" },
+          orderBy: [desc(finishedPcComponents.installedAt)],
         },
-        currentComponents: { include: { category: true } },
+        currentComponents: { with: { category: true } },
         salesItems: {
-          include: { salesOrder: { select: { id: true, code: true, status: true, confirmedAt: true } } },
+          with: { salesOrder: { columns: { id: true, code: true, status: true, confirmedAt: true } } },
         },
       },
     });
@@ -89,22 +109,48 @@ export class FinishedPcsService {
       categoryCode: l.component.category.code,
       model: l.component.model,
       serial: l.component.serialNumber,
-      installedAt: l.installedAt,
-      removedAt: l.removedAt,
+      // Nested relation rows may deserialize timestamps as raw millis;
+      // normalise to Date so JSON keeps the previous ISO string shape.
+      installedAt: new Date(l.installedAt),
+      removedAt: l.removedAt === null ? null : new Date(l.removedAt),
       isCurrent: l.removedAt === null,
     }));
+
+    // Máy bán nguyên chiếc (tạo từ "Để nguyên — bán máy"): chưa tháo nên
+    // không có linh kiện thật trong kho — tab "Cấu hình" hiển thị kết quả
+    // Kiểm tra & định giá của máy gốc thay thế.
+    let sourceMachine: { id: string; code: string; serial: string | null } | null = null;
+    let machineSlots: CollapsedMachineSlot[] = [];
+    const linkedMachineId = machineIdFromFinishedPcNotes(item.notes);
+    if (linkedMachineId) {
+      const m = await this.dbs.db.query.machines.findFirst({
+        where: eq(machines.id, linkedMachineId),
+        with: { machineComponents: { with: { category: true } } },
+      });
+      if (m) {
+        sourceMachine = { id: m.id, code: m.code, serial: m.serial };
+        machineSlots = collapseMachineSlots(m.machineComponents);
+      }
+    }
 
     return {
       ...item,
       currentComponents,
       componentHistory,
+      sourceMachine,
+      machineSlots,
       // Repair history will be wired in Phase 3 (warranty/repair).
       repairHistory: [] as Array<unknown>,
     };
   }
 
   async update(id: string, dto: UpdateFinishedPcDto) {
-    const before = await this.prisma.finishedPc.findUnique({ where: { id } });
+    const beforeRows = await this.dbs.db
+      .select()
+      .from(finishedPcs)
+      .where(eq(finishedPcs.id, id))
+      .limit(1);
+    const before = beforeRows[0];
     if (!before) {
       throw new NotFoundException({ code: "FINISHED_PC_NOT_FOUND", message: "Finished PC not found" });
     }
@@ -115,43 +161,54 @@ export class FinishedPcsService {
         HttpStatus.CONFLICT,
       );
     }
-    return this.prisma.$transaction(async (tx) => {
-      const after = await tx.finishedPc.update({
-        where: { id },
-        data: {
+    return this.dbs.transaction(async (db) => {
+      const afterRows = await db
+        .update(finishedPcs)
+        .set({
           suggestedPrice: dto.suggestedPrice ?? before.suggestedPrice,
           notes: dto.notes ?? before.notes,
-        },
-      });
+          updatedAt: new Date(),
+        })
+        .where(eq(finishedPcs.id, id))
+        .returning();
+      const after = afterRows[0];
       await this.audit.record(
         { action: "finished_pc.update", entityType: "FinishedPc", entityId: id, before, after },
-        tx,
+        db,
       );
       return after;
     });
   }
 
   async transition(id: string, dto: TransitionFinishedPcDto) {
-    const before = await this.prisma.finishedPc.findUnique({ where: { id } });
+    const beforeRows = await this.dbs.db
+      .select()
+      .from(finishedPcs)
+      .where(eq(finishedPcs.id, id))
+      .limit(1);
+    const before = beforeRows[0];
     if (!before) {
       throw new NotFoundException({ code: "FINISHED_PC_NOT_FOUND", message: "Finished PC not found" });
     }
     const allowed = TRANSITIONS_ALLOWED[before.status] ?? [];
-    if (!allowed.includes(dto.to as FinishedPcStatus)) {
+    if (!allowed.includes(dto.to as unknown as FinishedPcStatus)) {
       throw new BusinessError(
         "INVALID_STATUS_TRANSITION",
         `Cannot transition ${before.status} -> ${dto.to}`,
         HttpStatus.CONFLICT,
       );
     }
-    return this.prisma.$transaction(async (tx) => {
-      const after = await tx.finishedPc.update({
-        where: { id },
-        data: {
-          status: dto.to as FinishedPcStatus,
+    return this.dbs.transaction(async (db) => {
+      const afterRows = await db
+        .update(finishedPcs)
+        .set({
+          status: dto.to,
           readyAt: dto.to === "READY_FOR_SALE" ? new Date() : before.readyAt,
-        },
-      });
+          updatedAt: new Date(),
+        })
+        .where(eq(finishedPcs.id, id))
+        .returning();
+      const after = afterRows[0];
       await this.audit.record(
         {
           action: "finished_pc.transition",
@@ -160,16 +217,16 @@ export class FinishedPcsService {
           before,
           after,
         },
-        tx,
+        db,
       );
       return after;
     });
   }
 
   async scrap(id: string) {
-    const before = await this.prisma.finishedPc.findUnique({
-      where: { id },
-      include: { currentComponents: true },
+    const before = await this.dbs.db.query.finishedPcs.findFirst({
+      where: eq(finishedPcs.id, id),
+      with: { currentComponents: true },
     });
     if (!before) {
       throw new NotFoundException({ code: "FINISHED_PC_NOT_FOUND", message: "Finished PC not found" });
@@ -181,7 +238,7 @@ export class FinishedPcsService {
         HttpStatus.CONFLICT,
       );
     }
-    return this.prisma.$transaction(async (tx) => {
+    return this.dbs.transaction(async (db) => {
       for (const c of before.currentComponents) {
         await this.stock.create(
           {
@@ -192,24 +249,32 @@ export class FinishedPcsService {
             refId: id,
             newComponentStatus: ComponentStatus.SCRAPPED,
           },
-          tx,
+          db,
         );
-        await tx.finishedPcComponent.updateMany({
-          where: { finishedPcId: id, componentId: c.id, removedAt: null },
-          data: { removedAt: new Date() },
-        });
-        await tx.component.update({
-          where: { id: c.id },
-          data: { currentFinishedPcId: null },
-        });
+        await db
+          .update(finishedPcComponents)
+          .set({ removedAt: new Date(), updatedAt: new Date() })
+          .where(
+            and(
+              eq(finishedPcComponents.finishedPcId, id),
+              eq(finishedPcComponents.componentId, c.id),
+              isNull(finishedPcComponents.removedAt),
+            ),
+          );
+        await db
+          .update(components)
+          .set({ currentFinishedPcId: null, updatedAt: new Date() })
+          .where(eq(components.id, c.id));
       }
-      const after = await tx.finishedPc.update({
-        where: { id },
-        data: { status: FinishedPcStatus.SCRAPPED },
-      });
+      const afterRows = await db
+        .update(finishedPcs)
+        .set({ status: FinishedPcStatus.SCRAPPED, updatedAt: new Date() })
+        .where(eq(finishedPcs.id, id))
+        .returning();
+      const after = afterRows[0];
       await this.audit.record(
         { action: "finished_pc.scrap", entityType: "FinishedPc", entityId: id, before, after },
-        tx,
+        db,
       );
       return after;
     });

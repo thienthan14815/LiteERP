@@ -112,7 +112,7 @@ export default function NewSalePage() {
         items,
       });
       toast.success("Đã tạo đơn bán (nháp)");
-      router.push(`/sales/${result.id}`);
+      router.push(`/sales/detail?id=${result.id}`);
     } catch (err: any) {
       toast.error(err?.response?.data?.error?.message ?? "Không tạo được đơn bán");
     }

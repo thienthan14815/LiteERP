@@ -1,9 +1,19 @@
 import { HttpStatus, Injectable, NotFoundException } from "@nestjs/common";
-import { ComponentStatus, Prisma, StockTxnType } from "@prisma/client";
-import { PrismaService } from "../../database/prisma.service";
+import { and, asc, desc, eq, inArray, like, ne, or, sql, type SQL } from "drizzle-orm";
+import { ComponentStatus, StockTxnType } from "@app/shared";
+import { DbService } from "../../database/db.service";
+import {
+  attachments,
+  componentCategories,
+  components,
+  finishedPcComponents,
+  stockTransactions,
+} from "../../database/schema";
 import { AuditLogService } from "../audit-logs/audit-logs.service";
+import { AttachmentsService } from "../attachments/attachments.service";
 import { StockTransactionService } from "../inventory/stock-transaction.service";
 import { DriveService } from "../drive/drive.service";
+import { findComponentUsage } from "../../common/utils/entity-usage.util";
 import { BusinessError } from "../../common/exceptions/business.exception";
 import { buildPagination, paginate } from "../../common/utils/pagination.util";
 import { QueryComponentDto } from "./dto/query-component.dto";
@@ -12,38 +22,54 @@ import { UpdateComponentDto } from "./dto/update-component.dto";
 @Injectable()
 export class ComponentsService {
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly dbs: DbService,
     private readonly audit: AuditLogService,
     private readonly stock: StockTransactionService,
     private readonly drive: DriveService,
+    private readonly attachmentsSvc: AttachmentsService,
   ) {}
 
   async list(q: QueryComponentDto) {
-    const where: Prisma.ComponentWhereInput = {};
-    if (q.status) where.status = q.status;
-    if (q.condition) where.condition = q.condition;
-    if (q.categoryId) where.categoryId = q.categoryId;
+    const db = this.dbs.db;
+    const conds: SQL[] = [];
+    if (q.status) conds.push(eq(components.status, q.status));
+    if (q.condition) conds.push(eq(components.condition, q.condition));
+    if (q.categoryId) conds.push(eq(components.categoryId, q.categoryId));
     if (q.categoryCode) {
-      where.category = { code: q.categoryCode };
+      // Relation filter (category.code): resolve to the categoryId first —
+      // category codes are unique, so this matches Prisma's `category: { code }`.
+      const catRows = await db
+        .select({ id: componentCategories.id })
+        .from(componentCategories)
+        .where(eq(componentCategories.code, q.categoryCode))
+        .limit(1);
+      const cat = catRows[0];
+      if (cat) conds.push(eq(components.categoryId, cat.id));
+      else conds.push(sql`1 = 0`);
     }
     if (q.search) {
-      where.OR = [
-        { code: { contains: q.search, mode: "insensitive" } },
-        { serialNumber: { contains: q.search, mode: "insensitive" } },
-        { model: { contains: q.search, mode: "insensitive" } },
-      ];
+      const term = `%${q.search}%`;
+      const searchCond = or(
+        like(components.code, term),
+        like(components.serialNumber, term),
+        like(components.model, term),
+      );
+      if (searchCond) conds.push(searchCond);
     }
+    const where = conds.length ? and(...conds) : undefined;
     const { take, skip } = buildPagination(q.page, q.pageSize);
-    const [items, total] = await this.prisma.$transaction([
-      this.prisma.component.findMany({
-        where,
-        include: { category: true },
-        orderBy: { createdAt: "desc" },
-        take,
-        skip,
-      }),
-      this.prisma.component.count({ where }),
-    ]);
+    const items = await db.query.components.findMany({
+      where,
+      with: { category: true },
+      orderBy: [desc(components.createdAt)],
+      limit: take,
+      offset: skip,
+    });
+    const totalRows = await db
+      .select({ count: sql<number>`count(*)`.as("count") })
+      .from(components)
+      .where(where);
+    const total = Number(totalRows[0]?.count ?? 0);
 
     // Lấy ảnh đầu tiên (mimeType image/*) cho mỗi component trong trang.
     const ids = items.map((c) => c.id);
@@ -51,14 +77,17 @@ export class ComponentsService {
     if (ids.length > 0) {
       // relatedType lịch sử có 2 biến thể: "Component" (Pascal) từ UI chi tiết,
       // "COMPONENT" (Screaming) từ các nơi khác — match cả hai.
-      const atts = await this.prisma.attachment.findMany({
-        where: {
-          relatedType: { in: ["Component", "COMPONENT"] },
-          relatedId: { in: ids },
-          mimeType: { startsWith: "image/" },
-        },
-        orderBy: { createdAt: "asc" },
-      });
+      const atts = await db
+        .select()
+        .from(attachments)
+        .where(
+          and(
+            inArray(attachments.relatedType, ["Component", "COMPONENT"]),
+            inArray(attachments.relatedId, ids),
+            like(attachments.mimeType, "image/%"),
+          ),
+        )
+        .orderBy(asc(attachments.createdAt));
       for (const a of atts) {
         if (!thumbById.has(a.relatedId) && a.driveFileId) {
           thumbById.set(a.relatedId, this.drive.getThumbnailUrl(a.driveFileId));
@@ -76,17 +105,17 @@ export class ComponentsService {
   }
 
   async get(id: string) {
-    const item = await this.prisma.component.findUnique({
-      where: { id },
-      include: {
+    const item = await this.dbs.db.query.components.findFirst({
+      where: eq(components.id, id),
+      with: {
         category: true,
         sourceMachine: true,
         currentFinishedPc: true,
         finishedPcLinks: {
-          include: { finishedPc: { select: { id: true, code: true, status: true } } },
-          orderBy: { installedAt: "desc" },
+          with: { finishedPc: { columns: { id: true, code: true, status: true } } },
+          orderBy: [desc(finishedPcComponents.installedAt)],
         },
-        stockTransactions: { orderBy: { createdAt: "desc" } },
+        stockTransactions: { orderBy: [desc(stockTransactions.createdAt)] },
       },
     });
     if (!item) throw new NotFoundException({ code: "COMPONENT_NOT_FOUND", message: "Component not found" });
@@ -108,24 +137,30 @@ export class ComponentsService {
   }
 
   async getBySerial(serial: string) {
-    const item = await this.prisma.component.findFirst({
-      where: { serialNumber: serial },
-      include: { category: true, currentFinishedPc: true, sourceMachine: true },
+    const item = await this.dbs.db.query.components.findFirst({
+      where: eq(components.serialNumber, serial),
+      with: { category: true, currentFinishedPc: true, sourceMachine: true },
     });
     if (!item) throw new NotFoundException({ code: "COMPONENT_NOT_FOUND", message: "Component not found" });
     return item;
   }
 
   async update(id: string, dto: UpdateComponentDto) {
-    const before = await this.prisma.component.findUnique({ where: { id } });
+    const beforeRows = await this.dbs.db
+      .select()
+      .from(components)
+      .where(eq(components.id, id))
+      .limit(1);
+    const before = beforeRows[0];
     if (!before) throw new NotFoundException({ code: "COMPONENT_NOT_FOUND", message: "Component not found" });
 
     if (dto.serialNumber && dto.serialNumber !== before.serialNumber) {
-      const dup = await this.prisma.component.findFirst({
-        where: { serialNumber: dto.serialNumber, NOT: { id } },
-        select: { id: true },
-      });
-      if (dup) {
+      const dupRows = await this.dbs.db
+        .select({ id: components.id })
+        .from(components)
+        .where(and(eq(components.serialNumber, dto.serialNumber), ne(components.id, id)))
+        .limit(1);
+      if (dupRows[0]) {
         throw new BusinessError(
           "SERIAL_TAKEN",
           `Serial ${dto.serialNumber} already in use`,
@@ -134,27 +169,36 @@ export class ComponentsService {
       }
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      const after = await tx.component.update({
-        where: { id },
-        data: {
+    return this.dbs.transaction(async (db) => {
+      const updated = await db
+        .update(components)
+        .set({
           condition: dto.condition ?? before.condition,
           location: dto.location ?? before.location,
           model: dto.model ?? before.model,
           serialNumber: dto.serialNumber ?? before.serialNumber,
           notes: dto.notes ?? before.notes,
-        },
-      });
+          costPrice: dto.costPrice ?? before.costPrice,
+          updatedAt: new Date(),
+        })
+        .where(eq(components.id, id))
+        .returning();
+      const after = updated[0];
       await this.audit.record(
         { action: "component.update", entityType: "Component", entityId: id, before, after },
-        tx,
+        db,
       );
       return after;
     });
   }
 
   async scrap(id: string) {
-    const before = await this.prisma.component.findUnique({ where: { id } });
+    const beforeRows = await this.dbs.db
+      .select()
+      .from(components)
+      .where(eq(components.id, id))
+      .limit(1);
+    const before = beforeRows[0];
     if (!before) throw new NotFoundException({ code: "COMPONENT_NOT_FOUND", message: "Component not found" });
     if (before.status !== ComponentStatus.IN_STOCK) {
       throw new BusinessError(
@@ -163,7 +207,7 @@ export class ComponentsService {
         HttpStatus.CONFLICT,
       );
     }
-    return this.prisma.$transaction(async (tx) => {
+    return this.dbs.transaction(async (db) => {
       await this.stock.create(
         {
           componentId: id,
@@ -173,14 +217,67 @@ export class ComponentsService {
           refType: "COMPONENT",
           refId: id,
         },
-        tx,
+        db,
       );
-      const after = await tx.component.findUniqueOrThrow({ where: { id } });
+      const afterRows = await db.select().from(components).where(eq(components.id, id)).limit(1);
+      const after = afterRows[0];
+      if (!after) throw new NotFoundException({ code: "COMPONENT_NOT_FOUND", message: "Component not found" });
       await this.audit.record(
         { action: "component.scrap", entityType: "Component", entityId: id, before, after },
-        tx,
+        db,
       );
       return after;
     });
+  }
+
+  /**
+   * Xóa hẳn linh kiện (nhập nhầm / dọn dữ liệu). Chặn khi đang được tham
+   * chiếu ở bất kỳ nghiệp vụ nào hoặc đang nằm trong máy thành phẩm / đã
+   * bán / đang giữ chỗ. Ledger stock_transactions của nó xóa kèm.
+   */
+  async remove(id: string) {
+    const before = await this.dbs.db.query.components.findFirst({
+      where: eq(components.id, id),
+    });
+    if (!before) throw new NotFoundException({ code: "COMPONENT_NOT_FOUND", message: "Component not found" });
+
+    if (before.currentFinishedPcId) {
+      throw new BusinessError(
+        "COMPONENT_IN_USE",
+        `Linh kiện ${before.code} đang nằm trong máy thành phẩm — không thể xóa`,
+        HttpStatus.CONFLICT,
+      );
+    }
+    if (
+      before.status === ComponentStatus.SOLD ||
+      before.status === ComponentStatus.RESERVED ||
+      before.status === ComponentStatus.ASSEMBLED
+    ) {
+      throw new BusinessError(
+        "COMPONENT_IN_USE",
+        `Linh kiện ${before.code} ở trạng thái ${before.status} — không thể xóa`,
+        HttpStatus.CONFLICT,
+      );
+    }
+    const usage = await findComponentUsage(this.dbs.db, [id]);
+    const usedIn = usage.get(id);
+    if (usedIn) {
+      throw new BusinessError(
+        "COMPONENT_IN_USE",
+        `Linh kiện ${before.code} đang được dùng ở: ${[...new Set(usedIn)].join(", ")} — không thể xóa`,
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    await this.dbs.transaction(async (db) => {
+      await db.delete(stockTransactions).where(eq(stockTransactions.componentId, id));
+      await db.delete(components).where(eq(components.id, id));
+      await this.audit.record(
+        { action: "component.delete", entityType: "Component", entityId: id, before },
+        db,
+      );
+    });
+    await this.attachmentsSvc.deleteAllFor(["Component", "COMPONENT"], id);
+    return { id, deleted: true };
   }
 }

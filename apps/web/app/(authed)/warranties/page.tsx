@@ -132,7 +132,7 @@ export default function WarrantiesPage() {
                   {data.items.map((w) => (
                     <TableRow key={w.id} className="cursor-pointer">
                       <TableCell>
-                        <Link href={`/warranties/${w.id}`} className="font-medium hover:underline">
+                        <Link href={`/warranties/detail?id=${w.id}`} className="font-medium hover:underline">
                           {w.code}
                         </Link>
                       </TableCell>

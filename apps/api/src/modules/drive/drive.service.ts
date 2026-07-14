@@ -4,7 +4,13 @@ import { Readable } from "node:stream";
 import { drive_v3, google } from "googleapis";
 import { BusinessError } from "../../common/exceptions/business.exception";
 import type { AppConfig } from "../../config/configuration";
+import { withRetry } from "../../common/utils/retry.util";
 import { DRIVE_FOLDER_PATH, DriveFolder } from "./drive-folder.enum";
+
+// Every outbound Drive request carries a hard timeout so a hung socket can
+// never block a backup/upload forever, and is retried with backoff+jitter on
+// transient (network / 429 / 5xx) failures.
+const DRIVE_TIMEOUT_MS = 30_000;
 
 // VN: DriveService là lớp DUY NHẤT được phép nói chuyện với Google Drive API.
 // Tuân theo ARCHITECTURE_forSQL.md:
@@ -75,24 +81,23 @@ export class DriveService {
     const drive = this.getDrive();
     const parentId = await this.resolveFolderId(folder);
 
-    // VN: googleapis chấp nhận stream. Wrap Buffer -> Readable để tránh nạp
-    // lại toàn bộ file vào RAM lần nữa (buffer đã ở trong RAM rồi, nhưng
-    // Readable.from tránh copy).
-    const media = {
-      mimeType,
-      body: Readable.from(buffer),
-    };
-
-    const res = await drive.files.create({
-      requestBody: {
-        name: filename,
-        parents: [parentId],
-        mimeType,
-      },
-      media,
-      fields: "id,size",
-      supportsAllDrives: false,
-    });
+    // Wrap in retry: the Readable is rebuilt from the buffer on EACH attempt
+    // (a consumed stream can't be replayed).
+    const res = await this.driveCall("upload", () =>
+      drive.files.create(
+        {
+          requestBody: {
+            name: filename,
+            parents: [parentId],
+            mimeType,
+          },
+          media: { mimeType, body: Readable.from(buffer) },
+          fields: "id,size",
+          supportsAllDrives: false,
+        },
+        { timeout: DRIVE_TIMEOUT_MS },
+      ),
+    );
 
     const driveFileId = res.data.id;
     if (!driveFileId) {
@@ -109,10 +114,15 @@ export class DriveService {
     // trả placeholder). Backup KHÔNG public — chỉ chủ Drive xem được.
     if (folder !== DriveFolder.BACKUP) {
       try {
-        await drive.permissions.create({
-          fileId: driveFileId,
-          requestBody: { role: "reader", type: "anyone" },
-        });
+        await this.driveCall("permissions.create", () =>
+          drive.permissions.create(
+            {
+              fileId: driveFileId,
+              requestBody: { role: "reader", type: "anyone" },
+            },
+            { timeout: DRIVE_TIMEOUT_MS },
+          ),
+        );
       } catch (err) {
         this.logger.warn(
           `Không set được permission public cho ${driveFileId}: ${(err as Error).message}. Thumbnail có thể không load.`,
@@ -132,7 +142,9 @@ export class DriveService {
     this.ensureConfigured();
     const drive = this.getDrive();
     try {
-      await drive.files.delete({ fileId: driveFileId });
+      await this.driveCall("delete", () =>
+        drive.files.delete({ fileId: driveFileId }, { timeout: DRIVE_TIMEOUT_MS }),
+      );
     } catch (err) {
       // VN: 404 nghĩa là file đã biến mất -> coi như xoá thành công (idempotent).
       const code = (err as { code?: number }).code;
@@ -157,12 +169,17 @@ export class DriveService {
     const out: Array<{ driveFileId: string; name: string; sizeBytes: number; createdAt: Date }> = [];
     let pageToken: string | undefined;
     do {
-      const res = await drive.files.list({
-        q: `'${folderId}' in parents and trashed = false`,
-        fields: "nextPageToken, files(id, name, size, createdTime)",
-        pageSize: 100,
-        pageToken,
-      });
+      const res = await this.driveCall("list", () =>
+        drive.files.list(
+          {
+            q: `'${folderId}' in parents and trashed = false`,
+            fields: "nextPageToken, files(id, name, size, createdTime)",
+            pageSize: 100,
+            pageToken,
+          },
+          { timeout: DRIVE_TIMEOUT_MS },
+        ),
+      );
       for (const f of res.data.files ?? []) {
         if (!f.id) continue;
         out.push({
@@ -191,6 +208,18 @@ export class DriveService {
   // -------------------------------------------------------------------------
   // Internal
   // -------------------------------------------------------------------------
+
+  // Run a Drive API call with backoff+jitter retries on transient failures.
+  // 404 (delete-of-missing) is NOT transient and surfaces to the caller.
+  private driveCall<T>(label: string, fn: () => Promise<T>): Promise<T> {
+    return withRetry(fn, {
+      retries: 3,
+      onRetry: (err, attempt, delayMs) =>
+        this.logger.warn(
+          `Drive ${label} retry #${attempt} in ${delayMs}ms: ${(err as Error).message}`,
+        ),
+    });
+  }
 
   private ensureConfigured(): void {
     if (!this.configured || !this.credentials) {
@@ -249,23 +278,33 @@ export class DriveService {
   ): Promise<string> {
     const escaped = name.replace(/'/g, "\\'");
     const q = `name = '${escaped}' and '${parentId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
-    const found = await drive.files.list({
-      q,
-      fields: "files(id,name)",
-      pageSize: 1,
-      spaces: "drive",
-    });
+    const found = await this.driveCall("folder.list", () =>
+      drive.files.list(
+        {
+          q,
+          fields: "files(id,name)",
+          pageSize: 1,
+          spaces: "drive",
+        },
+        { timeout: DRIVE_TIMEOUT_MS },
+      ),
+    );
     const first = found.data.files?.[0];
     if (first?.id) return first.id;
 
-    const created = await drive.files.create({
-      requestBody: {
-        name,
-        mimeType: "application/vnd.google-apps.folder",
-        parents: [parentId],
-      },
-      fields: "id",
-    });
+    const created = await this.driveCall("folder.create", () =>
+      drive.files.create(
+        {
+          requestBody: {
+            name,
+            mimeType: "application/vnd.google-apps.folder",
+            parents: [parentId],
+          },
+          fields: "id",
+        },
+        { timeout: DRIVE_TIMEOUT_MS },
+      ),
+    );
     if (!created.data.id) {
       throw new BusinessError(
         "DRIVE_FOLDER_CREATE_FAILED",

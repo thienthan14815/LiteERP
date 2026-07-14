@@ -172,7 +172,7 @@ export default function PurchasesListPage() {
                     </TableCell>
                     <TableCell>
                       <Button asChild variant="ghost" size="sm">
-                        <Link href={`/purchases/${row.id}`}>Xem</Link>
+                        <Link href={`/purchases/detail?id=${row.id}`}>Xem</Link>
                       </Button>
                     </TableCell>
                   </TableRow>

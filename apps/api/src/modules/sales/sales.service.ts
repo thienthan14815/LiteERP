@@ -1,13 +1,17 @@
 import { HttpStatus, Injectable, NotFoundException } from "@nestjs/common";
+import { and, desc, eq, gte, inArray, like, lte, ne, or, sql, type SQL } from "drizzle-orm";
 import {
   ComponentStatus,
   FinishedPcStatus,
-  Prisma,
+  MachineStatus,
   SalesItemType,
   SalesOrderStatus,
   StockTxnType,
-} from "@prisma/client";
-import { PrismaService } from "../../database/prisma.service";
+} from "@app/shared";
+import { DbService, DrizzleDb } from "../../database/db.service";
+import { components, customers, finishedPcs, machines, salesItems, salesOrders } from "../../database/schema";
+import { machineIdFromFinishedPcNotes } from "../../common/utils/machine-link.util";
+import { createId } from "../../database/id";
 import { CodeGeneratorService } from "../../common/utils/code-generator.service";
 import { AuditLogService } from "../audit-logs/audit-logs.service";
 import { StockTransactionService } from "../inventory/stock-transaction.service";
@@ -23,7 +27,7 @@ const CANCEL_WINDOW_MS = 24 * 60 * 60 * 1000;
 @Injectable()
 export class SalesService {
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly dbs: DbService,
     private readonly codes: CodeGeneratorService,
     private readonly audit: AuditLogService,
     private readonly stock: StockTransactionService,
@@ -31,36 +35,39 @@ export class SalesService {
   ) {}
 
   async list(q: QuerySaleDto) {
-    const where: Prisma.SalesOrderWhereInput = {};
-    if (q.status) where.status = q.status;
-    if (q.customerId) where.customerId = q.customerId;
-    if (q.fromDate || q.toDate) {
-      where.createdAt = {};
-      if (q.fromDate) (where.createdAt as Prisma.DateTimeFilter).gte = new Date(q.fromDate);
-      if (q.toDate) (where.createdAt as Prisma.DateTimeFilter).lte = new Date(q.toDate);
-    }
+    const conds: SQL[] = [];
+    if (q.status) conds.push(eq(salesOrders.status, q.status));
+    if (q.customerId) conds.push(eq(salesOrders.customerId, q.customerId));
+    if (q.fromDate) conds.push(gte(salesOrders.createdAt, new Date(q.fromDate)));
+    if (q.toDate) conds.push(lte(salesOrders.createdAt, new Date(q.toDate)));
     if (q.search) {
-      where.OR = [
-        { code: { contains: q.search, mode: "insensitive" } },
-        { orderName: { contains: q.search, mode: "insensitive" } },
-        { sellerName: { contains: q.search, mode: "insensitive" } },
-        { platform: { contains: q.search, mode: "insensitive" } },
-      ];
+      const term = `%${q.search}%`;
+      const searchCond = or(
+        like(salesOrders.code, term),
+        like(salesOrders.orderName, term),
+        like(salesOrders.sellerName, term),
+        like(salesOrders.platform, term),
+      );
+      if (searchCond) conds.push(searchCond);
     }
+    const where = conds.length ? and(...conds) : undefined;
     const { take, skip } = buildPagination(q.page, q.pageSize);
-    const [items, total] = await this.prisma.$transaction([
-      this.prisma.salesOrder.findMany({
-        where,
-        include: {
-          customer: { select: { id: true, name: true, phone: true } },
-          items: { select: { unitPrice: true, unitCost: true, quantity: true } },
-        },
-        orderBy: { createdAt: "desc" },
-        take,
-        skip,
-      }),
-      this.prisma.salesOrder.count({ where }),
-    ]);
+    const db = this.dbs.db;
+    const items = await db.query.salesOrders.findMany({
+      where,
+      with: {
+        customer: { columns: { id: true, name: true, phone: true } },
+        items: { columns: { unitPrice: true, unitCost: true, quantity: true } },
+      },
+      orderBy: [desc(salesOrders.createdAt)],
+      limit: take,
+      offset: skip,
+    });
+    const totalRows = await db
+      .select({ count: sql<number>`count(*)`.as("count") })
+      .from(salesOrders)
+      .where(where);
+    const total = Number(totalRows[0]?.count ?? 0);
     const projected = items.map((s) => {
       const revenue = s.items.reduce(
         (acc, it) => acc + Number(it.unitPrice) * it.quantity,
@@ -77,23 +84,18 @@ export class SalesService {
     return paginate(projected, total, q.page ?? 1, q.pageSize ?? 20);
   }
 
-  async get(id: string, tx?: Prisma.TransactionClient) {
-    const client: Prisma.TransactionClient | PrismaService = tx ?? this.prisma;
-    const item = await (client as Prisma.TransactionClient).salesOrder.findUnique({
-      where: { id },
-      include: {
+  async get(id: string, db?: DrizzleDb) {
+    const client = db ?? this.dbs.db;
+    const item = await client.query.salesOrders.findFirst({
+      where: eq(salesOrders.id, id),
+      with: {
         customer: true,
         items: {
-          include: {
-            finishedPc: { select: { id: true, code: true, status: true } },
+          with: {
+            finishedPc: { columns: { id: true, code: true, status: true } },
             component: {
-              select: {
-                id: true,
-                code: true,
-                model: true,
-                serialNumber: true,
-                category: { select: { code: true } },
-              },
+              columns: { id: true, code: true, model: true, serialNumber: true },
+              with: { category: { columns: { code: true } } },
             },
           },
         },
@@ -119,7 +121,7 @@ export class SalesService {
   }
 
   private async validateItems(
-    tx: Prisma.TransactionClient,
+    db: DrizzleDb,
     items: CreateSaleItemDto[],
     excludeSalesOrderId?: string,
   ) {
@@ -142,7 +144,9 @@ export class SalesService {
             HttpStatus.BAD_REQUEST,
           );
         }
-        const pc = await tx.finishedPc.findUnique({ where: { id: it.finishedPcId } });
+        const pc = (
+          await db.select().from(finishedPcs).where(eq(finishedPcs.id, it.finishedPcId)).limit(1)
+        )[0];
         if (!pc) {
           throw new BusinessError(
             "FINISHED_PC_NOT_FOUND",
@@ -158,12 +162,23 @@ export class SalesService {
           );
         }
         // Also check no other DRAFT order already references this PC
-        const dup = await tx.salesItem.findFirst({
-          where: {
-            finishedPcId: it.finishedPcId,
-            salesOrder: { status: SalesOrderStatus.DRAFT, ...(excludeSalesOrderId ? { id: { not: excludeSalesOrderId } } : {}) },
-          },
-        });
+        const draftOrderConds: SQL[] = [eq(salesOrders.status, SalesOrderStatus.DRAFT)];
+        if (excludeSalesOrderId) draftOrderConds.push(ne(salesOrders.id, excludeSalesOrderId));
+        const dup = (
+          await db
+            .select({ id: salesItems.id })
+            .from(salesItems)
+            .where(
+              and(
+                eq(salesItems.finishedPcId, it.finishedPcId),
+                inArray(
+                  salesItems.salesOrderId,
+                  db.select({ id: salesOrders.id }).from(salesOrders).where(and(...draftOrderConds)),
+                ),
+              ),
+            )
+            .limit(1)
+        )[0];
         if (dup) {
           throw new BusinessError(
             "FINISHED_PC_RESERVED_BY_DRAFT",
@@ -186,7 +201,9 @@ export class SalesService {
             HttpStatus.BAD_REQUEST,
           );
         }
-        const c = await tx.component.findUnique({ where: { id: it.componentId } });
+        const c = (
+          await db.select().from(components).where(eq(components.id, it.componentId)).limit(1)
+        )[0];
         if (!c) {
           throw new BusinessError(
             "COMPONENT_NOT_FOUND",
@@ -201,12 +218,23 @@ export class SalesService {
             HttpStatus.CONFLICT,
           );
         }
-        const dup = await tx.salesItem.findFirst({
-          where: {
-            componentId: it.componentId,
-            salesOrder: { status: SalesOrderStatus.DRAFT, ...(excludeSalesOrderId ? { id: { not: excludeSalesOrderId } } : {}) },
-          },
-        });
+        const draftOrderConds: SQL[] = [eq(salesOrders.status, SalesOrderStatus.DRAFT)];
+        if (excludeSalesOrderId) draftOrderConds.push(ne(salesOrders.id, excludeSalesOrderId));
+        const dup = (
+          await db
+            .select({ id: salesItems.id })
+            .from(salesItems)
+            .where(
+              and(
+                eq(salesItems.componentId, it.componentId),
+                inArray(
+                  salesItems.salesOrderId,
+                  db.select({ id: salesOrders.id }).from(salesOrders).where(and(...draftOrderConds)),
+                ),
+              ),
+            )
+            .limit(1)
+        )[0];
         if (dup) {
           throw new BusinessError(
             "COMPONENT_RESERVED_BY_DRAFT",
@@ -219,8 +247,10 @@ export class SalesService {
   }
 
   async create(dto: CreateSaleDto) {
-    return this.prisma.$transaction(async (tx) => {
-      const customer = await tx.customer.findUnique({ where: { id: dto.customerId } });
+    return this.dbs.transaction(async (db) => {
+      const customer = (
+        await db.select().from(customers).where(eq(customers.id, dto.customerId)).limit(1)
+      )[0];
       if (!customer) {
         throw new BusinessError(
           "CUSTOMER_NOT_FOUND",
@@ -228,55 +258,58 @@ export class SalesService {
           HttpStatus.NOT_FOUND,
         );
       }
-      await this.validateItems(tx, dto.items);
+      await this.validateItems(db, dto.items);
 
-      const code = await this.codes.next("SO", tx, 6);
+      const code = await this.codes.next("SO", db, 6);
       const totalAmount = dto.items.reduce(
         (s, it) => s + Number(it.unitPrice) * (it.qty ?? 1),
         0,
       );
-      const order = await tx.salesOrder.create({
-        data: {
-          code,
-          customerId: dto.customerId,
-          orderName: dto.orderName ?? null,
-          sellerName: dto.sellerName ?? null,
-          platform: dto.platform ?? null,
-          salesUrl: dto.salesUrl ?? null,
-          status: SalesOrderStatus.DRAFT,
-          totalAmount,
-          notes: dto.notes ?? null,
-          createdById: this.ctx.getUserId() ?? null,
-        },
-      });
+      const order = (
+        await db
+          .insert(salesOrders)
+          .values({
+            id: createId(),
+            code,
+            customerId: dto.customerId,
+            orderName: dto.orderName ?? null,
+            sellerName: dto.sellerName ?? null,
+            platform: dto.platform ?? null,
+            salesUrl: dto.salesUrl ?? null,
+            status: SalesOrderStatus.DRAFT,
+            totalAmount,
+            notes: dto.notes ?? null,
+            createdById: this.ctx.getUserId() ?? null,
+          })
+          .returning()
+      )[0];
       for (const it of dto.items) {
         const qty = it.qty ?? 1;
-        await tx.salesItem.create({
-          data: {
-            salesOrderId: order.id,
-            itemType: it.itemType,
-            finishedPcId: it.finishedPcId ?? null,
-            componentId: it.componentId ?? null,
-            quantity: qty,
-            unitPrice: it.unitPrice,
-            totalPrice: it.unitPrice * qty,
-          },
+        await db.insert(salesItems).values({
+          id: createId(),
+          salesOrderId: order.id,
+          itemType: it.itemType,
+          finishedPcId: it.finishedPcId ?? null,
+          componentId: it.componentId ?? null,
+          quantity: qty,
+          unitPrice: it.unitPrice,
+          totalPrice: it.unitPrice * qty,
         });
       }
 
       await this.audit.record(
         { action: "sale.create", entityType: "SalesOrder", entityId: order.id, after: order },
-        tx,
+        db,
       );
 
-      return this.get(order.id, tx);
+      return this.get(order.id, db);
     });
   }
 
   async update(id: string, dto: UpdateSaleDto) {
-    const before = await this.prisma.salesOrder.findUnique({
-      where: { id },
-      include: { items: true },
+    const before = await this.dbs.db.query.salesOrders.findFirst({
+      where: eq(salesOrders.id, id),
+      with: { items: true },
     });
     if (!before) {
       throw new NotFoundException({ code: "SALES_ORDER_NOT_FOUND", message: "Sales order not found" });
@@ -288,29 +321,28 @@ export class SalesService {
         HttpStatus.CONFLICT,
       );
     }
-    return this.prisma.$transaction(async (tx) => {
+    return this.dbs.transaction(async (db) => {
       if (dto.items) {
-        await this.validateItems(tx, dto.items, id);
-        await tx.salesItem.deleteMany({ where: { salesOrderId: id } });
+        await this.validateItems(db, dto.items, id);
+        await db.delete(salesItems).where(eq(salesItems.salesOrderId, id));
         for (const it of dto.items) {
           const qty = it.qty ?? 1;
-          await tx.salesItem.create({
-            data: {
-              salesOrderId: id,
-              itemType: it.itemType,
-              finishedPcId: it.finishedPcId ?? null,
-              componentId: it.componentId ?? null,
-              quantity: qty,
-              unitPrice: it.unitPrice,
-              totalPrice: it.unitPrice * qty,
-            },
+          await db.insert(salesItems).values({
+            id: createId(),
+            salesOrderId: id,
+            itemType: it.itemType,
+            finishedPcId: it.finishedPcId ?? null,
+            componentId: it.componentId ?? null,
+            quantity: qty,
+            unitPrice: it.unitPrice,
+            totalPrice: it.unitPrice * qty,
           });
         }
       }
-      const finalItems = dto.items
+      const finalItems: CreateSaleItemDto[] = dto.items
         ? dto.items
         : before.items.map((it) => ({
-            itemType: it.itemType,
+            itemType: it.itemType as SalesItemType,
             finishedPcId: it.finishedPcId ?? undefined,
             componentId: it.componentId ?? undefined,
             unitPrice: Number(it.unitPrice),
@@ -321,33 +353,37 @@ export class SalesService {
         0,
       );
 
-      const after = await tx.salesOrder.update({
-        where: { id },
-        data: {
-          customerId: dto.customerId ?? before.customerId,
-          orderName: dto.orderName ?? before.orderName,
-          sellerName: dto.sellerName ?? before.sellerName,
-          platform: dto.platform ?? before.platform,
-          salesUrl: dto.salesUrl ?? before.salesUrl,
-          notes: dto.notes ?? before.notes,
-          totalAmount,
-        },
-      });
+      const after = (
+        await db
+          .update(salesOrders)
+          .set({
+            customerId: dto.customerId ?? before.customerId,
+            orderName: dto.orderName ?? before.orderName,
+            sellerName: dto.sellerName ?? before.sellerName,
+            platform: dto.platform ?? before.platform,
+            salesUrl: dto.salesUrl ?? before.salesUrl,
+            notes: dto.notes ?? before.notes,
+            totalAmount,
+            updatedAt: new Date(),
+          })
+          .where(eq(salesOrders.id, id))
+          .returning()
+      )[0];
       await this.audit.record(
         { action: "sale.update", entityType: "SalesOrder", entityId: id, before, after },
-        tx,
+        db,
       );
-      return this.get(id, tx);
+      return this.get(id, db);
     });
   }
 
   async confirm(id: string) {
-    const before = await this.prisma.salesOrder.findUnique({
-      where: { id },
-      include: {
+    const before = await this.dbs.db.query.salesOrders.findFirst({
+      where: eq(salesOrders.id, id),
+      with: {
         items: {
-          include: {
-            finishedPc: { include: { currentComponents: true } },
+          with: {
+            finishedPc: { with: { currentComponents: true } },
             component: true,
           },
         },
@@ -364,7 +400,7 @@ export class SalesService {
       );
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    return this.dbs.transaction(async (db) => {
       let totalAmount = 0;
       for (const it of before.items) {
         if (it.itemType === SalesItemType.FINISHED_PC) {
@@ -375,26 +411,50 @@ export class SalesService {
               HttpStatus.CONFLICT,
             );
           }
-          const pcUpdate = await tx.finishedPc.updateMany({
-            where: { id: it.finishedPc.id, status: FinishedPcStatus.READY_FOR_SALE },
-            data: {
+          const pcUpdate = await db
+            .update(finishedPcs)
+            .set({
               status: FinishedPcStatus.SOLD,
               soldPrice: it.unitPrice,
               soldAt: new Date(),
-            },
-          });
-          if (pcUpdate.count !== 1) {
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(finishedPcs.id, it.finishedPc.id),
+                eq(finishedPcs.status, FinishedPcStatus.READY_FOR_SALE),
+              ),
+            )
+            .returning({ id: finishedPcs.id });
+          if (pcUpdate.length !== 1) {
             throw new BusinessError(
               "FINISHED_PC_NOT_SELLABLE",
               `Finished PC ${it.finishedPc.code} khong con san sang ban`,
               HttpStatus.CONFLICT,
             );
           }
+          // Máy cũ bán nguyên chiếc: đồng bộ máy gốc → SOLD.
+          const linkedMachineId = machineIdFromFinishedPcNotes(it.finishedPc.notes);
+          if (linkedMachineId) {
+            await db
+              .update(machines)
+              .set({
+                status: MachineStatus.SOLD,
+                soldAt: new Date(),
+                updatedAt: new Date(),
+              })
+              .where(
+                and(
+                  eq(machines.id, linkedMachineId),
+                  eq(machines.status, MachineStatus.READY_FOR_SALE),
+                ),
+              );
+          }
           const itemCost = Number(it.finishedPc.costPrice);
-          await tx.salesItem.update({
-            where: { id: it.id },
-            data: { unitCost: itemCost },
-          });
+          await db
+            .update(salesItems)
+            .set({ unitCost: itemCost, updatedAt: new Date() })
+            .where(eq(salesItems.id, it.id));
 
           for (const c of it.finishedPc.currentComponents) {
             const ok = await this.stock.tryTransitionComponent(
@@ -407,7 +467,7 @@ export class SalesService {
                 refType: "SALES_ORDER",
                 refId: before.id,
               },
-              tx,
+              db,
             );
             if (!ok) {
               throw new BusinessError(
@@ -435,7 +495,7 @@ export class SalesService {
               refType: "SALES_ORDER",
               refId: before.id,
             },
-            tx,
+            db,
           );
           if (!ok) {
             throw new BusinessError(
@@ -445,37 +505,41 @@ export class SalesService {
             );
           }
           const itemCost = Number(it.component.costPrice);
-          await tx.salesItem.update({
-            where: { id: it.id },
-            data: { unitCost: itemCost },
-          });
+          await db
+            .update(salesItems)
+            .set({ unitCost: itemCost, updatedAt: new Date() })
+            .where(eq(salesItems.id, it.id));
         }
         totalAmount += Number(it.unitPrice) * it.quantity;
       }
 
-      const after = await tx.salesOrder.update({
-        where: { id },
-        data: {
-          status: SalesOrderStatus.CONFIRMED,
-          confirmedAt: new Date(),
-          totalAmount,
-        },
-      });
+      const after = (
+        await db
+          .update(salesOrders)
+          .set({
+            status: SalesOrderStatus.CONFIRMED,
+            confirmedAt: new Date(),
+            totalAmount,
+            updatedAt: new Date(),
+          })
+          .where(eq(salesOrders.id, id))
+          .returning()
+      )[0];
       await this.audit.record(
         { action: "sale.confirm", entityType: "SalesOrder", entityId: id, before, after },
-        tx,
+        db,
       );
-      return this.get(id, tx);
+      return this.get(id, db);
     });
   }
 
   async cancel(id: string) {
-    const before = await this.prisma.salesOrder.findUnique({
-      where: { id },
-      include: {
+    const before = await this.dbs.db.query.salesOrders.findFirst({
+      where: eq(salesOrders.id, id),
+      with: {
         items: {
-          include: {
-            finishedPc: { include: { componentLinks: true } },
+          with: {
+            finishedPc: { with: { componentLinks: true } },
             component: true,
           },
         },
@@ -493,7 +557,7 @@ export class SalesService {
     }
     if (
       before.confirmedAt &&
-      Date.now() - before.confirmedAt.getTime() > CANCEL_WINDOW_MS
+      Date.now() - new Date(before.confirmedAt).getTime() > CANCEL_WINDOW_MS
     ) {
       throw new BusinessError(
         "CANCEL_WINDOW_EXPIRED",
@@ -502,17 +566,35 @@ export class SalesService {
       );
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    return this.dbs.transaction(async (db) => {
       for (const it of before.items) {
         if (it.itemType === SalesItemType.FINISHED_PC && it.finishedPc) {
-          await tx.finishedPc.update({
-            where: { id: it.finishedPc.id },
-            data: {
+          await db
+            .update(finishedPcs)
+            .set({
               status: FinishedPcStatus.READY_FOR_SALE,
               soldPrice: null,
               soldAt: null,
-            },
-          });
+              updatedAt: new Date(),
+            })
+            .where(eq(finishedPcs.id, it.finishedPc.id));
+          // Máy cũ bán nguyên chiếc: hủy đơn → máy gốc quay lại chờ bán.
+          const linkedMachineId = machineIdFromFinishedPcNotes(it.finishedPc.notes);
+          if (linkedMachineId) {
+            await db
+              .update(machines)
+              .set({
+                status: MachineStatus.READY_FOR_SALE,
+                soldAt: null,
+                updatedAt: new Date(),
+              })
+              .where(
+                and(
+                  eq(machines.id, linkedMachineId),
+                  eq(machines.status, MachineStatus.SOLD),
+                ),
+              );
+          }
           for (const link of it.finishedPc.componentLinks) {
             if (link.removedAt !== null) continue;
             await this.stock.create(
@@ -524,7 +606,7 @@ export class SalesService {
                 refId: before.id,
                 newComponentStatus: ComponentStatus.ASSEMBLED,
               },
-              tx,
+              db,
             );
           }
         } else if (it.itemType === SalesItemType.COMPONENT && it.component) {
@@ -537,19 +619,26 @@ export class SalesService {
               refId: before.id,
               newComponentStatus: ComponentStatus.IN_STOCK,
             },
-            tx,
+            db,
           );
         }
       }
-      const after = await tx.salesOrder.update({
-        where: { id },
-        data: { status: SalesOrderStatus.CANCELLED, cancelledAt: new Date() },
-      });
+      const after = (
+        await db
+          .update(salesOrders)
+          .set({
+            status: SalesOrderStatus.CANCELLED,
+            cancelledAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(salesOrders.id, id))
+          .returning()
+      )[0];
       await this.audit.record(
         { action: "sale.cancel", entityType: "SalesOrder", entityId: id, before, after },
-        tx,
+        db,
       );
-      return this.get(id, tx);
+      return this.get(id, db);
     });
   }
 }

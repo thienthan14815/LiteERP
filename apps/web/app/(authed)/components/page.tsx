@@ -203,7 +203,7 @@ export default function ComponentsListPage() {
                   <TableRow key={c.id}>
                     <TableCell>
                       <ThumbnailHoverPreview
-                        href={`/components/${c.id}`}
+                        href={`/components/detail?id=${c.id}`}
                         thumbnailUrl={c.thumbnailUrl}
                         alt={c.code}
                       />
@@ -225,7 +225,7 @@ export default function ComponentsListPage() {
                     </TableCell>
                     <TableCell>
                       <Button asChild variant="ghost" size="sm">
-                        <Link href={`/components/${c.id}`}>Xem</Link>
+                        <Link href={`/components/detail?id=${c.id}`}>Xem</Link>
                       </Button>
                     </TableCell>
                   </TableRow>

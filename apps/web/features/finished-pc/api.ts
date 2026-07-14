@@ -42,6 +42,17 @@ export interface FinishedPcComponentHistoryItem {
   isCurrent: boolean;
 }
 
+/** Slot cấu hình từ bước Kiểm tra & định giá của máy gốc (máy bán nguyên). */
+export interface MachineConfigSlot {
+  categoryCode: ComponentCategoryCode;
+  model?: string | null;
+  serial?: string | null;
+  condition?: string | null;
+  notes?: string | null;
+  quantity: number;
+  cost: number;
+}
+
 export interface FinishedPcDetail extends FinishedPcListItem {
   assemblyOrder?: {
     id: string;
@@ -50,6 +61,10 @@ export interface FinishedPcDetail extends FinishedPcListItem {
   } | null;
   currentComponents: FinishedPcComponentRef[];
   componentHistory: FinishedPcComponentHistoryItem[];
+  /** Máy gốc khi đây là máy bán nguyên chiếc ("Để nguyên — bán máy"). */
+  sourceMachine?: { id: string; code: string; serial?: string | null } | null;
+  /** Cấu hình theo kết quả kiểm tra máy gốc (máy bán nguyên chưa tháo). */
+  machineSlots?: MachineConfigSlot[];
   repairHistory: unknown[];
 }
 

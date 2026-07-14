@@ -137,17 +137,29 @@ function BackupSection() {
     }
   };
 
-  const validateAndConfirmRestore = (file: File) => {
+  const validateAndConfirmRestore = async (file: File) => {
     const lname = file.name.toLowerCase();
-    if (!lname.endsWith(".zip") && !lname.endsWith(".sql")) {
-      toast.error("Chỉ nhận file .zip hoặc .sql");
+    // Đuôi hợp lệ khớp backend: .zip (chứa .sqlite) hoặc .sqlite/.db thuần.
+    if (!lname.endsWith(".zip") && !lname.endsWith(".sqlite") && !lname.endsWith(".db")) {
+      toast.error("Chỉ nhận file .zip hoặc .sqlite/.db");
       return;
     }
     if (file.size > 200 * 1024 * 1024) {
       toast.error("File quá lớn (tối đa 200 MB)");
       return;
     }
-    setPendingRestore(file);
+    // Đọc NGAY vào bộ nhớ: trên Android WebView, File chọn qua bộ chọn hệ
+    // thống (content://) hay bị Chrome coi là "đã thay đổi" giữa lúc chọn và
+    // lúc upload → hủy request với net::ERR_UPLOAD_FILE_CHANGED (bug thật
+    // trên Fold5 2026-07-07). File dựng từ bytes trong RAM thì bất biến.
+    try {
+      const buf = await file.arrayBuffer();
+      setPendingRestore(
+        new File([buf], file.name, { type: file.type || "application/zip" }),
+      );
+    } catch {
+      toast.error("Không đọc được file — hãy chọn lại");
+    }
   };
 
   const doRestore = async () => {
@@ -237,8 +249,8 @@ function BackupSection() {
         <CardHeader>
           <CardTitle>Phục hồi dữ liệu</CardTitle>
           <CardDescription>
-            Kéo thả file .zip hoặc .sql vào đây. Toàn bộ dữ liệu hiện tại sẽ bị
-            <strong> ghi đè</strong>. Không thể hoàn tác.
+            Kéo thả file .zip hoặc .sqlite vào đây. Toàn bộ dữ liệu hiện tại sẽ
+            bị<strong> ghi đè</strong>. Không thể hoàn tác.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -269,7 +281,7 @@ function BackupSection() {
                 <Upload className="mb-2 h-8 w-8 text-muted-foreground" />
                 <p className="text-sm">Kéo thả file backup vào đây</p>
                 <p className="text-xs text-muted-foreground">
-                  .zip hoặc .sql — tối đa 200 MB
+                  .zip hoặc .sqlite — tối đa 200 MB
                 </p>
                 <Button
                   variant="outline"
@@ -282,7 +294,7 @@ function BackupSection() {
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".zip,.sql,application/zip,application/sql"
+                  accept=".zip,.sqlite,.db,application/zip"
                   className="hidden"
                   onChange={(e) => {
                     const f = e.target.files?.[0];

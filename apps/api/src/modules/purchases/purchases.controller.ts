@@ -41,4 +41,7 @@ export class PurchasesController {
 
   @Post(":id/cancel") @Permissions("purchase:cancel")
   cancel(@Param("id") id: string) { return this.svc.cancel(id); }
+
+  @Delete(":id") @Permissions("purchase:cancel")
+  remove(@Param("id") id: string) { return this.svc.remove(id); }
 }

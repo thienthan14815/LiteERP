@@ -1,3 +1,7 @@
+# ⚠️ LEGACY — the shipped app runs standalone on-device (SQLite, no external
+# services). This compose file describes the ORIGINAL server stack
+# (Postgres/Redis/MinIO/Nginx) and is kept for reference / running the legacy
+# topology only. It is NOT required to build or run LiteERP. See README.md.
 version: "3.9"
 
 services:

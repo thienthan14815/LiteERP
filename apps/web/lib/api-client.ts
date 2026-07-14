@@ -4,8 +4,12 @@ import axios, {
   type InternalAxiosRequestConfig,
 } from "axios";
 
+// When served by the API (NestJS ServeStatic) the FE and API share the same
+// origin, so a relative "/api/v1" base is enough and avoids CORS entirely.
+// A remote API can still be targeted via NEXT_PUBLIC_API_URL (e.g. dev server
+// against a hosted backend).
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api/v1";
+  process.env.NEXT_PUBLIC_API_URL ?? "/api/v1";
 
 // SECURITY TRADE-OFF (Phase 1 MVP):
 // We store both access + refresh tokens in localStorage for simplicity. This is

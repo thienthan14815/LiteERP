@@ -193,7 +193,7 @@ export default function DashboardPage() {
           iconColor="text-orange-500"
           label={t("kpi.inventory_value")}
           value={loadingDashboard ? "—" : formatVnd(dashboard?.inventoryValue ?? 0)}
-          hint="Linh kiện IN_STOCK"
+          hint="Máy + PC + linh kiện chưa bán"
         />
         <KpiCard
           icon={Monitor}
@@ -398,7 +398,7 @@ export default function DashboardPage() {
                   <tr key={p.id} className="hover:bg-slate-50">
                     <td className="px-5 py-3">
                       <Link
-                        href={`/purchases/${p.id}`}
+                        href={`/purchases/detail?id=${p.id}`}
                         className="font-medium text-sky-600 hover:underline"
                       >
                         {p.code}
@@ -466,7 +466,7 @@ export default function DashboardPage() {
                   <tr key={s.id} className="hover:bg-slate-50">
                     <td className="px-5 py-3">
                       <Link
-                        href={`/sales/${s.id}`}
+                        href={`/sales/detail?id=${s.id}`}
                         className="font-medium text-sky-600 hover:underline"
                       >
                         {s.code}

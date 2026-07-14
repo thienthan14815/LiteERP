@@ -4,8 +4,8 @@
     "outDir": "dist",
     "rootDir": "src",
     "composite": false,
-    "module": "ESNext",
-    "moduleResolution": "Bundler"
+    "module": "CommonJS",
+    "moduleResolution": "Node"
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]

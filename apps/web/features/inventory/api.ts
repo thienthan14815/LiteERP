@@ -30,6 +30,10 @@ export interface MachineListItem {
   code: string;
   serial?: string | null;
   model?: string | null;
+  /** Miêu tả từ purchase item gốc (BE list() project sẵn). */
+  description?: string | null;
+  /** Ảnh đầu tiên đính kèm máy (Drive thumbnail) — cột Hình ảnh. */
+  thumbnailUrl?: string | null;
   status: MachineStatus;
   purchasePrice: number;
   totalCost?: number;
@@ -42,6 +46,10 @@ export interface MachineSlot {
   serial?: string | null;
   condition?: ComponentCondition | null;
   notes?: string | null;
+  /** Số lượng linh kiện giống hệt nhau trên dòng này (mặc định 1). */
+  quantity?: number;
+  /** Giá vốn ban đầu cho MỖI linh kiện (đơn giá), nhập ở bước kiểm tra. */
+  cost?: number;
 }
 
 export interface MachineDetail extends MachineListItem {
@@ -57,14 +65,6 @@ export interface MachineDetail extends MachineListItem {
   inspection?: {
     inspectedAt?: string;
     slots: MachineSlot[];
-  } | null;
-  allocation?: {
-    allocatedAt?: string;
-    items: Array<{
-      categoryCode: ComponentCategoryCode;
-      cost: number;
-      label?: string;
-    }>;
   } | null;
   notes?: string | null;
 }
@@ -109,30 +109,16 @@ export async function inspectMachine(
         model: s.model?.trim() ? s.model.trim() : undefined,
         serial: s.serial?.trim() ? s.serial.trim() : undefined,
         condition: s.condition ?? ComponentCondition.GOOD,
+        quantity:
+          s.quantity && Number(s.quantity) > 0
+            ? Math.floor(Number(s.quantity))
+            : 1,
+        cost: Number(s.cost) > 0 ? Number(s.cost) : 0,
         notes: s.notes?.trim() ? s.notes.trim() : undefined,
       })),
     notes: payload.notes?.trim() ? payload.notes.trim() : undefined,
   };
   const { data } = await apiClient.post(`/machines/${id}/inspect`, body);
-  return unwrap<MachineDetail>(data);
-}
-
-export interface AllocateCostDto {
-  items: Array<{
-    categoryCode: ComponentCategoryCode;
-    cost: number;
-    label?: string;
-  }>;
-}
-
-export async function allocateMachineCost(
-  id: string,
-  payload: AllocateCostDto,
-): Promise<MachineDetail> {
-  const { data } = await apiClient.post(
-    `/machines/${id}/allocate-cost`,
-    payload,
-  );
   return unwrap<MachineDetail>(data);
 }
 
@@ -143,11 +129,14 @@ export async function disassembleMachine(id: string): Promise<MachineDetail> {
 
 export async function markMachineReadyForSale(
   id: string,
-): Promise<MachineDetail> {
+): Promise<MachineDetail & { finishedPc?: { id: string; code: string } }> {
   const { data } = await apiClient.post(
     `/machines/${id}/mark-ready-for-sale`,
   );
-  return unwrap<MachineDetail>(data);
+  // BE tạo kèm bản ghi PC thành phẩm (lên kệ) và trả `finishedPc.code`.
+  return unwrap<MachineDetail & { finishedPc?: { id: string; code: string } }>(
+    data,
+  );
 }
 
 export interface UpdateMachineDto {
@@ -162,6 +151,10 @@ export async function updateMachine(
 ): Promise<MachineDetail> {
   const { data } = await apiClient.patch(`/machines/${id}`, payload);
   return unwrap<MachineDetail>(data);
+}
+
+export async function deleteMachine(id: string): Promise<void> {
+  await apiClient.delete(`/machines/${id}`);
 }
 
 /* ---------------- COMPONENTS ---------------- */
@@ -233,6 +226,27 @@ export async function scrapComponent(id: string): Promise<ComponentDetail> {
   return unwrap<ComponentDetail>(data);
 }
 
+export interface UpdateComponentDto {
+  condition?: ComponentCondition;
+  location?: string;
+  model?: string;
+  serialNumber?: string;
+  notes?: string;
+  costPrice?: number;
+}
+
+export async function updateComponent(
+  id: string,
+  payload: UpdateComponentDto,
+): Promise<ComponentDetail> {
+  const { data } = await apiClient.patch(`/components/${id}`, payload);
+  return unwrap<ComponentDetail>(data);
+}
+
+export async function deleteComponent(id: string): Promise<void> {
+  await apiClient.delete(`/components/${id}`);
+}
+
 /* ---------------- STOCK TRANSACTIONS ---------------- */
 
 export interface StockTransaction {
@@ -267,6 +281,10 @@ export async function listStockTransactions(
 export interface InventorySummary {
   byStatus: Array<{ status: ComponentStatus; count: number }>;
   byCategory: Array<{ category: ComponentCategoryCode; count: number }>;
+  /** Số máy cũ nhập kho theo trạng thái (VD: { NEW: 1, READY_FOR_SALE: 2 }). */
+  machines?: Record<string, number>;
+  /** Số PC thành phẩm theo trạng thái. */
+  finishedPcs?: Record<string, number>;
 }
 
 export async function getInventorySummary(): Promise<InventorySummary> {
@@ -275,6 +293,7 @@ export async function getInventorySummary(): Promise<InventorySummary> {
 }
 
 export interface InventoryValue {
+  /** Tổng vốn chưa bán: linh kiện + máy cũ + PC thành phẩm. */
   totalValue: number;
   totalCount: number;
   byCategory: Array<{
@@ -283,6 +302,11 @@ export interface InventoryValue {
     value: number;
     count: number;
   }>;
+  breakdown?: {
+    components: { value: number; count: number };
+    machines: { value: number; count: number };
+    finishedPcs: { value: number; count: number };
+  };
 }
 
 export async function getInventoryValue(): Promise<InventoryValue> {

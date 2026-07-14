@@ -165,7 +165,7 @@ export default function SalesListPage() {
                     </TableCell>
                     <TableCell>
                       <Button asChild variant="ghost" size="sm">
-                        <Link href={`/sales/${row.id}`}>Xem</Link>
+                        <Link href={`/sales/detail?id=${row.id}`}>Xem</Link>
                       </Button>
                     </TableCell>
                   </TableRow>

@@ -1,18 +1,17 @@
-// VN: Phase 1 dùng Postgres. Có 2 chiến lược chạy pg_dump:
-//   1) BACKUP_STRATEGY=docker (mặc định) → docker exec <container> pg_dump ...
-//      → không cần cài pg_dump ở host, chỉ cần Docker.
-//   2) BACKUP_STRATEGY=local  → gọi pg_dump có sẵn trên PATH của host.
-// Khi migrate sang SQLite trong tương lai: thay `runDump` và filename extension,
-// giữ nguyên flow upload Drive + insert BackupRecord + retention GFS.
+// VN: SQLite backup:
+//   1) `PRAGMA wal_checkpoint(TRUNCATE)` để đảm bảo WAL đã flush vào file DB.
+//   2) `fs.copyFile` file .sqlite → tmp path.
+//   3) Nén thành .zip qua adm-zip (đã có sẵn dep).
+//   4) Upload Drive + insert BackupRecord + retention GFS (giữ nguyên logic cũ).
+// Restore: giải nén .zip → file .sqlite → ghi đè file DB hiện hành. Yêu cầu
+// restart process vì connection sqlite3 vẫn giữ file handle cũ.
 import { HttpStatus, Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { BackupKind } from "@prisma/client";
+import { BackupKind } from "@app/shared";
 import AdmZip from "adm-zip";
-import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { PrismaService } from "../../database/prisma.service";
+import { dirname, join } from "node:path";
+import { DbService } from "../../database/db.service";
 import { BusinessError } from "../../common/exceptions/business.exception";
 import { AuditLogService } from "../audit-logs/audit-logs.service";
 import { DriveService } from "../drive/drive.service";
@@ -49,46 +48,43 @@ export class BackupService {
 
   constructor(
     private readonly config: ConfigService<AppConfig, true>,
-    private readonly prisma: PrismaService,
+    private readonly dbs: DbService,
     private readonly audit: AuditLogService,
     private readonly drive: DriveService,
     private readonly repo: BackupRepository,
   ) {}
 
   async dumpAndUpload(): Promise<BackupResult> {
-    const dbUrl = this.config.get("database", { infer: true }).url;
-    if (!dbUrl) {
-      throw new BusinessError(
-        "BACKUP_UNAVAILABLE",
-        "DATABASE_URL is not set — cannot run pg_dump",
-        HttpStatus.SERVICE_UNAVAILABLE,
-      );
-    }
+    const dbPath = await this.resolveDbPath();
 
-    const strategy = (process.env.BACKUP_STRATEGY ?? "docker").toLowerCase();
-    const dockerContainer = process.env.BACKUP_DOCKER_CONTAINER ?? "refurb-postgres";
-
-    const sqlFilename = this.buildSqlFilename();
+    const sqliteFilename = this.buildSqliteFilename();
     const zipFilename = this.buildZipFilename();
-    const tmpSqlPath = join(tmpdir(), sqlFilename);
+    // Temp copy sống cạnh file DB thay vì os.tmpdir(): trên Android không có
+    // /tmp ghi được (EACCES), còn thư mục chứa DB thì chắc chắn ghi được.
+    const tmpDbPath = join(dirname(dbPath), `.backup-${sqliteFilename}`);
     try {
-      await this.runDump(strategy, dockerContainer, dbUrl, tmpSqlPath);
+      // 1) Checkpoint WAL để .sqlite đứng yên đủ dữ liệu để copy nguyên tử.
+      //    TRUNCATE nén WAL về 0 byte sau khi flush.
+      await this.dbs.queryRaw("PRAGMA wal_checkpoint(TRUNCATE)");
+      // 2) Copy file DB (SQLite chấp nhận copy khi WAL đã checkpoint).
+      await fs.copyFile(dbPath, tmpDbPath);
 
-      const stat = await fs.stat(tmpSqlPath);
+      const stat = await fs.stat(tmpDbPath);
       if (stat.size === 0) {
         throw new BusinessError(
           "BACKUP_UNAVAILABLE",
-          "pg_dump produced an empty file",
+          "SQLite database file is empty",
           HttpStatus.INTERNAL_SERVER_ERROR,
         );
       }
-      const sqlBuffer = await fs.readFile(tmpSqlPath);
+      const dbBuffer = await fs.readFile(tmpDbPath);
 
-      // Gói .sql vào .zip — dump SQL nén rất tốt (thường ~5-10x nhỏ hơn).
+      // 3) Gói .sqlite vào .zip — SQLite nén khá tốt (thường 2-4x nhỏ hơn).
       const zip = new AdmZip();
-      zip.addFile(sqlFilename, sqlBuffer);
+      zip.addFile(sqliteFilename, dbBuffer);
       const zipBuffer = zip.toBuffer();
 
+      // 4) Upload lên Drive.
       const uploaded = await this.drive.uploadFile(
         zipBuffer,
         zipFilename,
@@ -97,8 +93,8 @@ export class BackupService {
       );
       const filename = zipFilename;
 
-      // Rule 4: mọi write đi qua $transaction — insert record + audit atomic.
-      const record = await this.prisma.$transaction(async (tx) => {
+      // Rule 4: mọi write đi qua transaction — insert record + audit atomic.
+      const record = await this.dbs.transaction(async (db) => {
         const rec = await this.repo.create(
           {
             driveFileId: uploaded.driveFileId,
@@ -106,7 +102,7 @@ export class BackupService {
             sizeBytes: uploaded.sizeBytes,
             kind: BackupKind.DAILY,
           },
-          tx,
+          db,
         );
         await this.audit.record(
           {
@@ -115,13 +111,12 @@ export class BackupService {
             entityId: uploaded.driveFileId,
             after: { filename, sizeBytes: uploaded.sizeBytes, recordId: rec.id },
           },
-          tx,
+          db,
         );
         return rec;
       });
 
       // Retention GFS: mặc định TẮT — user muốn giữ toàn bộ backup trên Drive.
-      // Bật lại bằng BACKUP_RETENTION_ENABLED=true nếu cần cắt tỉa sau này.
       const retentionEnabled =
         (process.env.BACKUP_RETENTION_ENABLED ?? "false").toLowerCase() === "true";
       const retention = retentionEnabled
@@ -133,12 +128,12 @@ export class BackupService {
         id: record.id,
         sizeBytes: uploaded.sizeBytes,
         filename,
-        kind: record.kind,
+        kind: record.kind as BackupKind,
         uploadedAt: record.createdAt.toISOString(),
         retention,
       };
     } finally {
-      await fs.unlink(tmpSqlPath).catch(() => undefined);
+      await fs.unlink(tmpDbPath).catch(() => undefined);
     }
   }
 
@@ -153,14 +148,14 @@ export class BackupService {
       id: r.id,
       filename: r.filename,
       sizeBytes: r.sizeBytes,
-      kind: r.kind,
+      kind: r.kind as BackupKind,
       createdAt: r.createdAt.toISOString(),
     }));
   }
 
   /**
-   * Phục hồi DB từ file .zip (chứa .sql) hoặc .sql thuần.
-   * DANGEROUS: sẽ DROP mọi bảng và load lại từ dump. Không rollback được.
+   * Phục hồi DB từ file .zip (chứa .sqlite) hoặc .sqlite thuần.
+   * DANGEROUS: ghi đè file DB hiện hành, cần restart process để sqlite3 mở lại.
    * Chỉ ADMIN được gọi (guard ở controller).
    */
   async restore(
@@ -175,22 +170,27 @@ export class BackupService {
       );
     }
 
-    // Tách .sql ra khỏi zip nếu là zip; nếu là .sql thuần → dùng thẳng.
     const lname = (file.originalname ?? "").toLowerCase();
-    let sqlBuffer: Buffer;
+    let dbBuffer: Buffer;
     if (lname.endsWith(".zip")) {
       try {
         const zip = new AdmZip(file.buffer);
-        const entries = zip.getEntries().filter((e) => !e.isDirectory && e.entryName.toLowerCase().endsWith(".sql"));
+        const entries = zip
+          .getEntries()
+          .filter(
+            (e) =>
+              !e.isDirectory &&
+              (e.entryName.toLowerCase().endsWith(".sqlite") ||
+                e.entryName.toLowerCase().endsWith(".db")),
+          );
         if (entries.length === 0) {
           throw new BusinessError(
             "RESTORE_INVALID_FILE",
-            "File .zip không chứa file .sql nào",
+            "File .zip không chứa file .sqlite nào",
             HttpStatus.BAD_REQUEST,
           );
         }
-        // Nếu có nhiều .sql, chọn cái đầu (backup của app này chỉ có 1).
-        sqlBuffer = entries[0].getData();
+        dbBuffer = entries[0].getData();
       } catch (err) {
         if (err instanceof BusinessError) throw err;
         throw new BusinessError(
@@ -199,119 +199,140 @@ export class BackupService {
           HttpStatus.BAD_REQUEST,
         );
       }
-    } else if (lname.endsWith(".sql")) {
-      sqlBuffer = file.buffer;
+    } else if (lname.endsWith(".sqlite") || lname.endsWith(".db")) {
+      dbBuffer = file.buffer;
     } else {
       throw new BusinessError(
         "RESTORE_INVALID_FILE",
-        "Chỉ nhận .sql hoặc .zip (chứa .sql)",
+        "Chỉ nhận .sqlite/.db hoặc .zip (chứa .sqlite)",
         HttpStatus.BAD_REQUEST,
       );
     }
 
-    if (sqlBuffer.length === 0) {
+    if (dbBuffer.length === 0) {
       throw new BusinessError(
         "RESTORE_INVALID_FILE",
-        "File SQL trống sau khi giải nén",
+        "File SQLite trống sau khi giải nén",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    // Sanity check magic bytes: SQLite v3 file bắt đầu "SQLite format 3\0".
+    const magic = dbBuffer.slice(0, 16).toString("utf8");
+    if (!magic.startsWith("SQLite format 3")) {
+      throw new BusinessError(
+        "RESTORE_INVALID_FILE",
+        "File không phải database SQLite hợp lệ (magic bytes sai)",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const dbPath = await this.resolveDbPath();
+
+    // Ghi file phục hồi ra cạnh DB rồi PRAGMA integrity_check trên một
+    // connection riêng TRƯỚC khi đụng vào DB thật — magic bytes đúng vẫn có
+    // thể là file đứt gãy (đã xảy ra thật: copy DB đang mở giữa chừng),
+    // ghi đè thẳng sẽ phá DB không cứu được.
+    const incomingPath = `${dbPath}.incoming`;
+    try {
+      await fs.writeFile(incomingPath, dbBuffer);
+      await this.dbs.verifySqliteFile(incomingPath);
+    } catch (err) {
+      await fs.unlink(incomingPath).catch(() => undefined);
+      throw new BusinessError(
+        "RESTORE_INVALID_FILE",
+        `File phục hồi không phải database SQLite lành lặn: ${(err as Error).message}`,
         HttpStatus.BAD_REQUEST,
       );
     }
 
     // Audit TRƯỚC khi restore (vì restore sẽ ghi đè cả bảng audit_logs).
-    // Nếu restore fail, audit này vẫn tồn tại.
-    await this.audit.record({
-      action: "backup.restore.start",
-      entityType: "Backup",
-      entityId: "*",
-      after: { filename: file.originalname, sizeBytes: sqlBuffer.length },
-    });
+    // Best-effort: nếu DB hiện tại đã hỏng thì restore chính là đường cứu —
+    // không để bước audit chặn nó.
+    await this.audit
+      .record({
+        action: "backup.restore.start",
+        entityType: "Backup",
+        entityId: "*",
+        after: { filename: file.originalname, sizeBytes: dbBuffer.length },
+      })
+      .catch((err) =>
+        this.logger.warn(`audit backup.restore.start failed (continuing): ${(err as Error).message}`),
+      );
 
-    // Ngắt Prisma trước để tránh giữ connection khi psql restore.
-    // (KHÔNG cần disconnect hoàn toàn — psql chạy ngoài Node, dùng connection riêng)
-    const strategy = (process.env.BACKUP_STRATEGY ?? "docker").toLowerCase();
-    const dockerContainer = process.env.BACKUP_DOCKER_CONTAINER ?? "refurb-postgres";
-    const tmpSqlPath = join(tmpdir(), `restore-${Date.now()}.sql`);
+    // Checkpoint + ĐÓNG hẳn connection trước khi ghi đè (tương đương
+    // $disconnect() của Prisma trước đây). Trong cửa sổ close→reopen mọi
+    // request khác chạm DB sẽ lỗi — chấp nhận được cho app single-user.
+    // Checkpoint best-effort vì DB hiện tại có thể đã hỏng.
+    await this.dbs.queryRaw("PRAGMA wal_checkpoint(TRUNCATE)").catch(() => undefined);
+    await this.dbs.close();
+
+    // Giữ bản DB trước-restore để quay về được nếu bản mới không mở nổi,
+    // rồi swap file (rename cùng thư mục = atomic) + xoá WAL/SHM cũ.
+    const preRestorePath = `${dbPath}.pre-restore`;
     try {
-      await fs.writeFile(tmpSqlPath, sqlBuffer);
-      await this.runRestore(strategy, dockerContainer, tmpSqlPath);
-    } finally {
-      await fs.unlink(tmpSqlPath).catch(() => undefined);
+      await fs.copyFile(dbPath, preRestorePath).catch(() => undefined);
+      await fs.rename(incomingPath, dbPath);
+      await fs.unlink(`${dbPath}-journal`).catch(() => undefined);
+      await fs.unlink(`${dbPath}-wal`).catch(() => undefined);
+      await fs.unlink(`${dbPath}-shm`).catch(() => undefined);
+    } catch (err) {
+      await fs.unlink(incomingPath).catch(() => undefined);
+      // Mở lại connection kể cả khi ghi đè thất bại — DB cũ vẫn nguyên vẹn.
+      await this.dbs.reopen().catch(() => undefined);
+      throw new BusinessError(
+        "RESTORE_FAILED",
+        `Không ghi được file DB: ${(err as Error).message}. Cần restart process API.`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
     }
+    await this.dbs.reopen();
 
-    // Sau restore audit_logs đã bị ghi đè — audit "start" ở trên đã mất, nhưng
-    // vẫn ghi audit "done" mới để đánh dấu điểm phục hồi.
-    await this.audit.record({
-      action: "backup.restore.done",
-      entityType: "Backup",
-      entityId: "*",
-      after: {
-        filename: file.originalname,
-        sizeBytes: sqlBuffer.length,
-        durationMs: Date.now() - t0,
-      },
-    });
+    // Probe đọc trên DB vừa restore — nếu không đọc được thì quay về bản
+    // trước-restore thay vì để hệ thống sống trên DB chết.
+    try {
+      await this.dbs.queryRaw("SELECT 1 FROM users LIMIT 1");
+    } catch (err) {
+      await this.dbs.close().catch(() => undefined);
+      await fs.copyFile(preRestorePath, dbPath).catch(() => undefined);
+      await fs.unlink(preRestorePath).catch(() => undefined);
+      await this.dbs.reopen().catch(() => undefined);
+      throw new BusinessError(
+        "RESTORE_FAILED",
+        `DB sau phục hồi không đọc được (${(err as Error).message}) — đã quay về dữ liệu trước đó.`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+    await fs.unlink(preRestorePath).catch(() => undefined);
+
+    // Audit "done" ghi qua connection MỚI vào DB vừa restore. BEST-EFFORT:
+    // khi restore backup từ máy KHÁC (đồng bộ PC ↔ điện thoại), actor user id
+    // trong request context là id của DB CŨ — không tồn tại trong DB mới →
+    // FK violation. Restore lúc này đã xong; không để bước ghi log biến một
+    // ca thành công thành lỗi 500 (bug thật đã gặp trên thiết bị 2026-07-07).
+    await this.audit
+      .record({
+        action: "backup.restore.done",
+        entityType: "Backup",
+        entityId: "*",
+        after: {
+          filename: file.originalname,
+          sizeBytes: dbBuffer.length,
+          durationMs: Date.now() - t0,
+          note: "Restart API process to ensure clean handles",
+        },
+      })
+      .catch((err) =>
+        this.logger.warn(
+          `audit backup.restore.done failed (restore itself SUCCEEDED): ${(err as Error).message}`,
+        ),
+      );
 
     return {
       restoredFrom: file.originalname,
-      sizeBytes: sqlBuffer.length,
+      sizeBytes: dbBuffer.length,
       durationMs: Date.now() - t0,
     };
-  }
-
-  private runRestore(
-    strategy: string,
-    container: string,
-    sqlFilePath: string,
-  ): Promise<void> {
-    return new Promise((resolve, reject) => {
-      // Chiến lược docker: `docker exec -i <container> psql -U app -d app`
-      // stdin nhận SQL. -i giữ stdin mở để pipe.
-      const dockerMode = strategy === "docker";
-      const cmd = dockerMode ? "docker" : "psql";
-      const args = dockerMode
-        ? [
-            "exec",
-            "-i",
-            container,
-            "psql",
-            "-U",
-            "app",
-            "-d",
-            "app",
-            "-v",
-            "ON_ERROR_STOP=1",
-          ]
-        : ["-U", "app", "-d", "app", "-v", "ON_ERROR_STOP=1"];
-      const child = spawn(cmd, args, {
-        shell: process.platform === "win32",
-      });
-      let stderr = "";
-      child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
-      child.on("error", (err) =>
-        reject(
-          new BusinessError(
-            "RESTORE_UNAVAILABLE",
-            `${cmd} spawn error: ${err.message}`,
-            HttpStatus.SERVICE_UNAVAILABLE,
-          ),
-        ),
-      );
-      child.on("close", (code) => {
-        if (code === 0) return resolve();
-        reject(
-          new BusinessError(
-            "RESTORE_FAILED",
-            `Restore SQL exit code ${code}: ${stderr.slice(0, 800)}`,
-            HttpStatus.INTERNAL_SERVER_ERROR,
-          ),
-        );
-      });
-      // Pipe .sql file vào stdin của psql.
-      import("node:fs").then((fsSync) => {
-        const rs = fsSync.createReadStream(sqlFilePath);
-        rs.pipe(child.stdin);
-      });
-    });
   }
 
   async remove(id: string): Promise<{ deleted: true }> {
@@ -319,11 +340,9 @@ export class BackupService {
     if (!rec) {
       throw new BusinessError("BACKUP_NOT_FOUND", "Backup record not found", HttpStatus.NOT_FOUND);
     }
-    // Xoá Drive trước — nếu lỗi thì DB record vẫn tồn tại → có thể retry.
-    // Idempotent: DriveService xử lý 404 = coi như đã xoá.
     await this.drive.deleteFile(rec.driveFileId);
-    await this.prisma.$transaction(async (tx) => {
-      await this.repo.deleteById(id, tx);
+    await this.dbs.transaction(async (db) => {
+      await this.repo.deleteById(id, db);
       await this.audit.record(
         {
           action: "backup.delete",
@@ -331,7 +350,7 @@ export class BackupService {
           entityId: rec.driveFileId,
           before: { filename: rec.filename, sizeBytes: rec.sizeBytes },
         },
-        tx,
+        db,
       );
     });
     return { deleted: true };
@@ -342,9 +361,6 @@ export class BackupService {
    *   - Giữ 7 daily gần nhất (mỗi ngày 1 bản mới nhất)
    *   - Giữ 4 weekly gần nhất (mỗi tuần 1 bản mới nhất — theo tuần ISO)
    *   - Giữ 3 monthly gần nhất (mỗi tháng 1 bản mới nhất)
-   * Bất kỳ record nào KHÔNG rơi vào 3 tập trên → xoá Drive + DB.
-   * Đồng thời tự phân loại (`kind`) mỗi record: WEEKLY nếu là bản đại diện tuần,
-   * MONTHLY nếu là bản đại diện tháng, còn lại DAILY.
    */
   async runRetention(): Promise<{ deleted: number; kept: number }> {
     const all = await this.repo.findAllOrderedNewestFirst();
@@ -354,11 +370,9 @@ export class BackupService {
     const weeklyKeepers = new Set<string>();
     const monthlyKeepers = new Set<string>();
 
-    // Group theo day/week/month key (ISO). Vì `all` đã sort newest-first,
-    // lần đầu bắt gặp key nào tức là bản mới nhất trong nhóm đó.
-    const seenDay = new Map<string, string>();       // day-key → recordId
-    const seenWeek = new Map<string, string>();      // ISO week-key → recordId
-    const seenMonth = new Map<string, string>();     // month-key → recordId
+    const seenDay = new Map<string, string>();
+    const seenWeek = new Map<string, string>();
+    const seenMonth = new Map<string, string>();
 
     for (const r of all) {
       const d = r.createdAt;
@@ -370,7 +384,6 @@ export class BackupService {
       if (!seenMonth.has(monthKey)) seenMonth.set(monthKey, r.id);
     }
 
-    // Insertion order = mới nhất → cũ nhất; slice để lấy top-N.
     for (const id of Array.from(seenDay.values()).slice(0, KEEP_DAILY)) dailyKeepers.add(id);
     for (const id of Array.from(seenWeek.values()).slice(0, KEEP_WEEKLY)) weeklyKeepers.add(id);
     for (const id of Array.from(seenMonth.values()).slice(0, KEEP_MONTHLY)) monthlyKeepers.add(id);
@@ -378,7 +391,6 @@ export class BackupService {
     const keep = new Set<string>([...dailyKeepers, ...weeklyKeepers, ...monthlyKeepers]);
     const toDelete = all.filter((r) => !keep.has(r.id));
 
-    // Xoá trên Drive song song (best-effort). Nếu lỗi mạng lẻ tẻ vẫn tiếp tục.
     const results = await Promise.allSettled(
       toDelete.map((r) => this.drive.deleteFile(r.driveFileId)),
     );
@@ -392,9 +404,8 @@ export class BackupService {
       );
     }
 
-    // Xoá DB record + reclassify kind cho các keeper. Bọc trong 1 transaction.
-    await this.prisma.$transaction(async (tx) => {
-      if (successfulIds.length > 0) await this.repo.deleteByIds(successfulIds, tx);
+    await this.dbs.transaction(async (db) => {
+      if (successfulIds.length > 0) await this.repo.deleteByIds(successfulIds, db);
       for (const r of all) {
         if (!keep.has(r.id)) continue;
         const expected = monthlyKeepers.has(r.id)
@@ -402,7 +413,7 @@ export class BackupService {
           : weeklyKeepers.has(r.id)
             ? BackupKind.WEEKLY
             : BackupKind.DAILY;
-        if (r.kind !== expected) await this.repo.updateKind(r.id, expected, tx);
+        if (r.kind !== expected) await this.repo.updateKind(r.id, expected, db);
       }
       await this.audit.record(
         {
@@ -415,15 +426,15 @@ export class BackupService {
             failedDelete: failedCount,
           },
         },
-        tx,
+        db,
       );
     });
 
     return { deleted: successfulIds.length, kept: keep.size };
   }
 
-  private buildSqlFilename(): string {
-    return `app-${this.stamp()}.sql`;
+  private buildSqliteFilename(): string {
+    return `app-${this.stamp()}.sqlite`;
   }
 
   private buildZipFilename(): string {
@@ -436,150 +447,40 @@ export class BackupService {
     return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
   }
 
-  private async runDump(
-    strategy: string,
-    dockerContainer: string,
-    dbUrl: string,
-    outPath: string,
-  ): Promise<void> {
-    if (strategy === "docker") {
-      await this.runDumpViaDocker(dockerContainer, outPath);
-    } else {
-      await this.assertPgDumpAvailable();
-      await this.runDumpLocal(dbUrl, outPath);
+  // Trả về đường dẫn tuyệt đối của file .sqlite mà SQLite đang mở.
+  // `PRAGMA database_list` là cách chính thức lấy path — không phụ thuộc cwd
+  // hay format của DATABASE_URL. Row.name === 'main' = DB chính.
+  private async resolveDbPath(): Promise<string> {
+    type Row = { seq: number; name: string; file: string };
+    const rows = await this.dbs.queryRaw<Row>("PRAGMA database_list");
+    const main = rows.find((r) => r.name === "main");
+    if (!main || !main.file) {
+      throw new BusinessError(
+        "BACKUP_UNAVAILABLE",
+        "Không xác định được đường dẫn file SQLite (PRAGMA database_list trống). Kiểm tra DATABASE_URL.",
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
     }
-  }
-
-  private runDumpViaDocker(container: string, outPath: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      // docker exec <container> pg_dump -U app --no-owner --no-privileges app
-      // → pipe stdout về Node để ghi ra file. Không dùng -T (đó là flag của
-      // docker-compose, không phải docker CLI). Docker CLI mặc định KHÔNG cấp
-      // TTY nếu không có -t, đúng cho stream stdout binary.
-      const args = [
-        "exec",
-        container,
-        "pg_dump",
-        "-U",
-        "app",
-        "--no-owner",
-        "--no-privileges",
-        "app",
-      ];
-      const child = spawn("docker", args, { shell: process.platform === "win32" });
-      const chunks: Buffer[] = [];
-      let stderr = "";
-      child.stdout.on("data", (d: Buffer) => chunks.push(d));
-      child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
-      child.on("error", (err) =>
-        reject(
-          new BusinessError(
-            "BACKUP_UNAVAILABLE",
-            `docker exec spawn error: ${err.message}. Đảm bảo Docker Desktop chạy và container ${container} tồn tại.`,
-            HttpStatus.SERVICE_UNAVAILABLE,
-          ),
-        ),
-      );
-      child.on("close", async (code) => {
-        if (code !== 0) {
-          reject(
-            new BusinessError(
-              "BACKUP_UNAVAILABLE",
-              `docker exec pg_dump exited with code ${code}: ${stderr.slice(0, 500)}`,
-              HttpStatus.INTERNAL_SERVER_ERROR,
-            ),
-          );
-          return;
-        }
-        try {
-          await fs.writeFile(outPath, Buffer.concat(chunks));
-          resolve();
-        } catch (err) {
-          reject(
-            new BusinessError(
-              "BACKUP_UNAVAILABLE",
-              `Failed to write dump to disk: ${(err as Error).message}`,
-              HttpStatus.INTERNAL_SERVER_ERROR,
-            ),
-          );
-        }
-      });
-    });
-  }
-
-  private assertPgDumpAvailable(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const child = spawn("pg_dump", ["--version"], { shell: true });
-      let stderr = "";
-      child.stderr.on("data", (d) => (stderr += d.toString()));
-      child.on("error", () =>
-        reject(
-          new BusinessError(
-            "BACKUP_UNAVAILABLE",
-            "pg_dump không có trên host. Đổi BACKUP_STRATEGY=docker hoặc cài PostgreSQL client tools.",
-            HttpStatus.SERVICE_UNAVAILABLE,
-          ),
-        ),
-      );
-      child.on("close", (code) => {
-        if (code === 0) return resolve();
-        reject(
-          new BusinessError(
-            "BACKUP_UNAVAILABLE",
-            `pg_dump --version exit ${code}: ${stderr}`,
-            HttpStatus.SERVICE_UNAVAILABLE,
-          ),
-        );
-      });
-    });
-  }
-
-  private runDumpLocal(dbUrl: string, outPath: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const args = ["--no-owner", "--no-privileges", "-f", outPath, dbUrl];
-      const child = spawn("pg_dump", args, { shell: true });
-      let stderr = "";
-      child.stderr.on("data", (d) => (stderr += d.toString()));
-      child.on("error", (err) =>
-        reject(
-          new BusinessError(
-            "BACKUP_UNAVAILABLE",
-            `pg_dump spawn error: ${err.message}`,
-            HttpStatus.INTERNAL_SERVER_ERROR,
-          ),
-        ),
-      );
-      child.on("close", (code) => {
-        if (code === 0) return resolve();
-        reject(
-          new BusinessError(
-            "BACKUP_UNAVAILABLE",
-            `pg_dump exited with code ${code}: ${stderr.slice(0, 500)}`,
-            HttpStatus.INTERNAL_SERVER_ERROR,
-          ),
-        );
-      });
-    });
+    return main.file;
   }
 }
 
 // -----------------------------------------------------------------------------
-// Helpers — pure, testable, không phụ thuộc runtime.
+// Helpers — pure, testable.
 // -----------------------------------------------------------------------------
 
-function dayKeyOf(d: Date): string {
+export function dayKeyOf(d: Date): string {
   return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
 }
 
-function monthKeyOf(d: Date): string {
+export function monthKeyOf(d: Date): string {
   return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}`;
 }
 
-// ISO week: tuần bắt đầu Thứ 2, W01 = tuần chứa Thứ Năm đầu tiên trong năm.
-function isoWeekKeyOf(d: Date): string {
+export function isoWeekKeyOf(d: Date): string {
   const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-  const dayNum = (t.getUTCDay() + 6) % 7; // 0=Mon
-  t.setUTCDate(t.getUTCDate() - dayNum + 3); // nearest Thursday
+  const dayNum = (t.getUTCDay() + 6) % 7;
+  t.setUTCDate(t.getUTCDate() - dayNum + 3);
   const firstThursday = new Date(Date.UTC(t.getUTCFullYear(), 0, 4));
   const diff = (t.getTime() - firstThursday.getTime()) / 86400000;
   const weekNum = 1 + Math.round((diff - 3 + ((firstThursday.getUTCDay() + 6) % 7)) / 7);

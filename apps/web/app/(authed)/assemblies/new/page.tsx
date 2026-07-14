@@ -161,7 +161,7 @@ export default function NewAssemblyPage() {
           onClick: () => router.push("/assemblies?status=DRAFT"),
         },
       });
-      router.push(`/assemblies/${result.id}`);
+      router.push(`/assemblies/detail?id=${result.id}`);
     } catch (err: any) {
       toast.error(
         err?.response?.data?.error?.message ?? "Không tạo được phiếu lắp ráp",

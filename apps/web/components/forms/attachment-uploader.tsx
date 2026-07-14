@@ -50,7 +50,12 @@ export function AttachmentUploader({ relatedType, relatedId, onUploaded, readonl
   const upload = async (file: File) => {
     setUploading(true);
     try {
-      const uploaded = await uploadToDrive({ file, relatedType, relatedId });
+      // Đọc vào RAM trước khi upload: File content:// trên Android WebView có
+      // thể bị Chrome hủy với net::ERR_UPLOAD_FILE_CHANGED (metadata không ổn
+      // định giữa lúc chọn và lúc gửi) — cùng bug với phục hồi backup.
+      const buf = await file.arrayBuffer();
+      const stable = new File([buf], file.name, { type: file.type });
+      const uploaded = await uploadToDrive({ file: stable, relatedType, relatedId });
       toast.success(`Đã tải lên: ${file.name}`);
       onUploaded?.(uploaded);
       qc.invalidateQueries({ queryKey: ["attachments", relatedType, relatedId] });
@@ -165,15 +170,17 @@ export function AttachmentUploader({ relatedType, relatedId, onUploaded, readonl
                         </div>
                       )}
                     </button>
-                    {/* Overlay bấm xoá — không đè full ảnh cho khỏi vướng click preview */}
+                    {/* Nút xoá: LUÔN hiển thị. Bản cũ chỉ hiện khi hover
+                        (opacity-0 → group-hover) nên trên màn hình cảm ứng
+                        (WebView Android) không bao giờ thấy được nút xoá. */}
                     {!readonly && (
                       <button
                         type="button"
                         onClick={() => setPendingDelete(a.id)}
-                        className="absolute right-1 top-1 rounded-full bg-white/90 p-1 opacity-0 shadow transition-opacity group-hover:opacity-100"
+                        className="absolute right-1 top-1 rounded-full bg-white/90 p-1.5 shadow"
                         title="Xoá"
                       >
-                        <Trash2 className="h-3.5 w-3.5 text-rose-600" />
+                        <Trash2 className="h-4 w-4 text-rose-600" />
                       </button>
                     )}
                   </div>

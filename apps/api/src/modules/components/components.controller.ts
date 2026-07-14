@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import { ComponentsService } from "./components.service";
 import { QueryComponentDto } from "./dto/query-component.dto";
 import { UpdateComponentDto } from "./dto/update-component.dto";
@@ -24,4 +24,7 @@ export class ComponentsController {
 
   @Post(":id/scrap") @Permissions("component:scrap")
   scrap(@Param("id") id: string) { return this.svc.scrap(id); }
+
+  @Delete(":id") @Permissions("component:scrap")
+  remove(@Param("id") id: string) { return this.svc.remove(id); }
 }

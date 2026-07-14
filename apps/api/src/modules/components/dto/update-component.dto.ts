@@ -1,5 +1,5 @@
-import { IsEnum, IsOptional, IsString } from "class-validator";
-import { ComponentCondition } from "@prisma/client";
+import { IsEnum, IsNumber, IsOptional, IsString, Min } from "class-validator";
+import { ComponentCondition } from "@app/shared";
 
 export class UpdateComponentDto {
   @IsOptional() @IsEnum(ComponentCondition) condition?: ComponentCondition;
@@ -7,4 +7,5 @@ export class UpdateComponentDto {
   @IsOptional() @IsString() model?: string;
   @IsOptional() @IsString() serialNumber?: string;
   @IsOptional() @IsString() notes?: string;
+  @IsOptional() @IsNumber() @Min(0) costPrice?: number;
 }

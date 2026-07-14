@@ -1,9 +1,9 @@
-import { Body, Controller, Get, HttpCode, Post, Req } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, Post } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
-import { Request } from "express";
 import { AuthService } from "./auth.service";
 import { LoginDto } from "./dto/login.dto";
 import { RefreshDto } from "./dto/refresh.dto";
+import { ChangePasswordDto } from "./dto/change-password.dto";
 import { Public } from "../../common/decorators/public.decorator";
 import { CurrentUser, AuthUser } from "../../common/decorators/current-user.decorator";
 
@@ -30,6 +30,12 @@ export class AuthController {
   @HttpCode(204)
   async logout(@Body() dto: RefreshDto) {
     await this.auth.logout(dto.refreshToken);
+  }
+
+  @Post("change-password")
+  @HttpCode(200)
+  changePassword(@CurrentUser() user: AuthUser, @Body() dto: ChangePasswordDto) {
+    return this.auth.changePassword(user.id, dto.currentPassword, dto.newPassword);
   }
 
   @Get("me")

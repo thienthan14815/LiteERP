@@ -149,7 +149,7 @@ export default function FinishedPcsListPage() {
                     </TableCell>
                     <TableCell>
                       <Button asChild variant="ghost" size="sm">
-                        <Link href={`/finished-pcs/${row.id}`}>Xem</Link>
+                        <Link href={`/finished-pcs/detail?id=${row.id}`}>Xem</Link>
                       </Button>
                     </TableCell>
                   </TableRow>

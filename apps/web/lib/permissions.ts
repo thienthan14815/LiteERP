@@ -30,6 +30,7 @@ export const PERM = {
   PURCHASE_CANCEL: "purchase:cancel",
 
   MACHINE_VIEW: "machine:view",
+  MACHINE_UPDATE: "machine:update",
   MACHINE_INSPECT: "machine:inspect",
   MACHINE_ALLOCATE_COST: "machine:allocate_cost",
   MACHINE_DISASSEMBLE: "machine:disassemble",

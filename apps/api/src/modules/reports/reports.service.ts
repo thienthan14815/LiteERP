@@ -1,11 +1,14 @@
 import { Injectable } from "@nestjs/common";
+import { and, eq, gte, isNotNull, lte, sql } from "drizzle-orm";
+import { ComponentStatus, SalesItemType, SalesOrderStatus } from "@app/shared";
+import { DbService } from "../../database/db.service";
+import { computeStockValue } from "../../common/utils/stock-value.util";
 import {
-  ComponentStatus,
-  Prisma,
-  SalesItemType,
-  SalesOrderStatus,
-} from "@prisma/client";
-import { PrismaService } from "../../database/prisma.service";
+  componentCategories,
+  components,
+  salesItems,
+  salesOrders,
+} from "../../database/schema";
 
 export interface DateRangeQuery {
   fromDate?: string;
@@ -14,7 +17,7 @@ export interface DateRangeQuery {
 
 @Injectable()
 export class ReportsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly dbs: DbService) {}
 
   private range(q: DateRangeQuery): { from: Date; to: Date } {
     const from = q.fromDate ? new Date(q.fromDate) : firstDayOfMonth();
@@ -22,36 +25,41 @@ export class ReportsService {
     return { from, to };
   }
 
+  /** Sales orders CONFIRMED within [from, to] — shared revenue-report filter. */
+  private confirmedOrdersFilter(from: Date, to: Date) {
+    return and(
+      eq(salesOrders.status, SalesOrderStatus.CONFIRMED),
+      gte(salesOrders.confirmedAt, from),
+      lte(salesOrders.confirmedAt, to),
+    );
+  }
+
   async profit(q: DateRangeQuery) {
     const { from, to } = this.range(q);
-    const items = await this.prisma.salesItem.findMany({
-      where: {
-        salesOrder: {
-          status: SalesOrderStatus.CONFIRMED,
-          confirmedAt: { gte: from, lte: to },
-        },
-      },
-      select: {
-        unitPrice: true,
-        unitCost: true,
-        quantity: true,
-        salesOrder: { select: { confirmedAt: true } },
-      },
-    });
-    const orders = await this.prisma.salesOrder.count({
-      where: {
-        status: SalesOrderStatus.CONFIRMED,
-        confirmedAt: { gte: from, lte: to },
-      },
-    });
+    const db = this.dbs.db;
+    const items = await db
+      .select({
+        unitPrice: salesItems.unitPrice,
+        unitCost: salesItems.unitCost,
+        quantity: salesItems.quantity,
+        confirmedAt: salesOrders.confirmedAt,
+      })
+      .from(salesItems)
+      .innerJoin(salesOrders, eq(salesItems.salesOrderId, salesOrders.id))
+      .where(this.confirmedOrdersFilter(from, to));
+    const orderRows = await db
+      .select({ count: sql<number>`count(*)`.as("count") })
+      .from(salesOrders)
+      .where(this.confirmedOrdersFilter(from, to));
+    const orders = Number(orderRows[0]?.count ?? 0);
     const revenue = items.reduce((s, it) => s + Number(it.unitPrice) * it.quantity, 0);
     const cost = items.reduce((s, it) => s + Number(it.unitCost) * it.quantity, 0);
 
     const dailyMap = new Map<string, { revenue: number; cost: number }>();
     for (const it of items) {
-      const ts = it.salesOrder?.confirmedAt;
+      const ts = it.confirmedAt;
       if (!ts) continue;
-      const key = ts.toISOString().slice(0, 10);
+      const key = new Date(ts).toISOString().slice(0, 10);
       const cur = dailyMap.get(key) ?? { revenue: 0, cost: 0 };
       cur.revenue += Number(it.unitPrice) * it.quantity;
       cur.cost += Number(it.unitCost) * it.quantity;
@@ -73,55 +81,38 @@ export class ReportsService {
   }
 
   async inventoryValue() {
-    const rows = await this.prisma.component.findMany({
-      where: { status: ComponentStatus.IN_STOCK },
-      select: {
-        costPrice: true,
-        category: { select: { code: true, name: true } },
-      },
-    });
-    const byCategory = new Map<string, { category: string; name: string; value: number; count: number }>();
-    let totalValue = 0;
-    for (const r of rows) {
-      const v = Number(r.costPrice);
-      totalValue += v;
-      const cur = byCategory.get(r.category.code) ?? {
-        category: r.category.code,
-        name: r.category.name,
-        value: 0,
-        count: 0,
-      };
-      cur.value += v;
-      cur.count += 1;
-      byCategory.set(r.category.code, cur);
-    }
-    const all = Array.from(byCategory.values()).sort((a, b) => b.value - a.value);
+    // Giá trị tồn kho = linh kiện + máy cũ + PC thành phẩm chưa bán
+    // (định nghĩa & chống đếm trùng: xem stock-value.util).
+    const sv = await computeStockValue(this.dbs.db);
     return {
-      totalValue,
-      totalCount: rows.length,
-      byCategory: all,
-      topCategories: all.slice(0, 5),
+      totalValue: sv.totalValue,
+      totalCount: sv.totalCount,
+      byCategory: sv.byCategory,
+      topCategories: sv.byCategory.slice(0, 5),
+      breakdown: {
+        components: sv.components,
+        machines: sv.machines,
+        finishedPcs: sv.finishedPcs,
+      },
     };
   }
 
   async salesByProduct(q: DateRangeQuery) {
     const { from, to } = this.range(q);
-    const items = await this.prisma.salesItem.findMany({
-      where: {
-        salesOrder: {
-          status: SalesOrderStatus.CONFIRMED,
-          confirmedAt: { gte: from, lte: to },
-        },
-      },
-      select: {
-        itemType: true,
-        unitPrice: true,
-        unitCost: true,
-        quantity: true,
-        finishedPc: { select: { id: true } },
-        component: { select: { category: { select: { code: true, name: true } } } },
-      },
-    });
+    const items = await this.dbs.db
+      .select({
+        itemType: salesItems.itemType,
+        unitPrice: salesItems.unitPrice,
+        unitCost: salesItems.unitCost,
+        quantity: salesItems.quantity,
+        categoryCode: componentCategories.code,
+        categoryName: componentCategories.name,
+      })
+      .from(salesItems)
+      .innerJoin(salesOrders, eq(salesItems.salesOrderId, salesOrders.id))
+      .leftJoin(components, eq(salesItems.componentId, components.id))
+      .leftJoin(componentCategories, eq(components.categoryId, componentCategories.id))
+      .where(this.confirmedOrdersFilter(from, to));
     const buckets = new Map<string, { itemType: SalesItemType; name: string; qty: number; revenue: number; cost: number }>();
     for (const it of items) {
       let key: string;
@@ -130,11 +121,17 @@ export class ReportsService {
         key = "FINISHED_PC";
         name = "Máy thành phẩm";
       } else {
-        const code = it.component?.category.code ?? "OTHER";
+        const code = it.categoryCode ?? "OTHER";
         key = `COMPONENT:${code}`;
-        name = it.component?.category.name ?? code;
+        name = it.categoryName ?? code;
       }
-      const cur = buckets.get(key) ?? { itemType: it.itemType, name, qty: 0, revenue: 0, cost: 0 };
+      const cur = buckets.get(key) ?? {
+        itemType: it.itemType as SalesItemType,
+        name,
+        qty: 0,
+        revenue: 0,
+        cost: 0,
+      };
       cur.qty += it.quantity;
       cur.revenue += Number(it.unitPrice) * it.quantity;
       cur.cost += Number(it.unitCost) * it.quantity;
@@ -148,16 +145,12 @@ export class ReportsService {
   async topCustomers(q: DateRangeQuery & { limit?: number }) {
     const { from, to } = this.range(q);
     const limit = Math.max(1, Math.min(q.limit ?? 10, 100));
-    const orders = await this.prisma.salesOrder.findMany({
-      where: {
-        status: SalesOrderStatus.CONFIRMED,
-        confirmedAt: { gte: from, lte: to },
-        customerId: { not: null },
-      },
-      select: {
-        customerId: true,
-        customer: { select: { id: true, code: true, name: true, phone: true } },
-        items: { select: { unitPrice: true, unitCost: true, quantity: true } },
+    const orders = await this.dbs.db.query.salesOrders.findMany({
+      where: and(this.confirmedOrdersFilter(from, to), isNotNull(salesOrders.customerId)),
+      columns: { customerId: true },
+      with: {
+        customer: { columns: { id: true, code: true, name: true, phone: true } },
+        items: { columns: { unitPrice: true, unitCost: true, quantity: true } },
       },
     });
     const buckets = new Map<string, {
@@ -195,15 +188,13 @@ export class ReportsService {
 
   async inventoryAging(days = 30) {
     const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-    const rows = await this.prisma.component.findMany({
-      where: { status: ComponentStatus.IN_STOCK, createdAt: { lte: cutoff } },
-      select: {
-        id: true,
-        code: true,
-        createdAt: true,
-        costPrice: true,
-        category: { select: { code: true, name: true } },
-      },
+    const rows = await this.dbs.db.query.components.findMany({
+      where: and(
+        eq(components.status, ComponentStatus.IN_STOCK),
+        lte(components.createdAt, cutoff),
+      ),
+      columns: { id: true, code: true, createdAt: true, costPrice: true },
+      with: { category: { columns: { code: true, name: true } } },
     });
     const buckets = new Map<string, { category: string; name: string; count: number; value: number }>();
     for (const r of rows) {

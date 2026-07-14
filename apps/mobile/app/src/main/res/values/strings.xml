@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">LiteERP</string>
+    <string name="boot_message">Đang khởi động máy chủ LiteERP…</string>
+    <string name="boot_error">Không thể khởi động LiteERP. Vui lòng khởi động lại ứng dụng.</string>
+</resources>

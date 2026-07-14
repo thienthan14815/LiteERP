@@ -1,65 +1,53 @@
-import { Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
-import { Queue, QueueEvents, Worker } from "bullmq";
-import { getRedisConnection } from "./redis-connection";
-
-export const REPORTS_QUEUE = "reports";
+import { Injectable, Logger } from "@nestjs/common";
+import { JobsService } from "../jobs.service";
 
 export interface GenerateReportPayload {
   reportType: string;
   params: Record<string, unknown>;
 }
 
+// In-process replacement for the former BullMQ queue (Redis removed for the
+// single-process / on-device deployment). Job state is now persisted in the
+// `jobs` table via JobsService, so a status(id) poll survives a restart and a
+// job interrupted by a crash is reconciled to "failed" on boot (no stuck
+// "running").
 @Injectable()
-export class ReportsQueueService implements OnModuleDestroy {
-  private readonly queue: Queue;
-  private readonly events: QueueEvents;
+export class ReportsQueueService {
+  private readonly logger = new Logger(ReportsQueueService.name);
 
-  constructor() {
-    const connection = getRedisConnection();
-    this.queue = new Queue(REPORTS_QUEUE, { connection });
-    this.events = new QueueEvents(REPORTS_QUEUE, { connection });
-  }
+  constructor(private readonly jobsSvc: JobsService) {}
 
   async enqueueGenerate(payload: GenerateReportPayload): Promise<string> {
-    const job = await this.queue.add("generate-report", payload, {
-      removeOnComplete: 100,
-      removeOnFail: 100,
+    const id = await this.jobsSvc.create("generate-report", payload);
+    setImmediate(async () => {
+      try {
+        await this.jobsSvc.markRunning(id);
+        // Stub work — matches the former worker behaviour.
+        this.logger.log(`generate-report ${id} for ${payload.reportType}`);
+        const csv = `report,${payload.reportType}\ngeneratedAt,${new Date().toISOString()}\n`;
+        await this.jobsSvc.markCompleted(id, {
+          ok: true,
+          fileName: `${payload.reportType}-${Date.now()}.csv`,
+          bytes: csv.length,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.error(`generate-report ${id} failed: ${msg}`);
+        await this.jobsSvc.markFailed(id, msg);
+      }
     });
-    return job.id ?? "";
+    return id;
   }
 
   async status(id: string) {
-    const job = await this.queue.getJob(id);
+    const job = await this.jobsSvc.get(id);
     if (!job) return { id, status: "not_found" };
-    const state = await job.getState();
     return {
       id,
-      status: state,
-      progress: job.progress,
-      returnValue: job.returnvalue,
-      failedReason: job.failedReason ?? null,
+      status: job.status,
+      progress: job.status === "completed" ? 100 : 0,
+      returnValue: job.result,
+      failedReason: job.error,
     };
   }
-
-  async onModuleDestroy() {
-    await this.queue.close();
-    await this.events.close();
-  }
-}
-
-export function startReportsWorker() {
-  const logger = new Logger("ReportsWorker");
-  return new Worker<GenerateReportPayload>(
-    REPORTS_QUEUE,
-    async (job) => {
-      logger.log(`Stub generate-report ${job.id} for ${job.data.reportType}`);
-      const csv = `report,${job.data.reportType}\ngeneratedAt,${new Date().toISOString()}\n`;
-      return {
-        ok: true,
-        fileName: `${job.data.reportType}-${Date.now()}.csv`,
-        bytes: csv.length,
-      };
-    },
-    { connection: getRedisConnection() },
-  );
 }

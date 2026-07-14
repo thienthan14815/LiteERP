@@ -1,0 +1,1 @@
+C:\Users\User\Desktop\LiteERP_Android\LiteERP\apps\mobile\app\CMakeLists.txt

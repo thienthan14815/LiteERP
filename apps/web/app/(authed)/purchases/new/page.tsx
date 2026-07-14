@@ -31,29 +31,63 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
-import {
-  COMPONENT_CATEGORY_LABEL,
-  PURCHASE_ITEM_TYPE_LABEL,
-} from "@/lib/labels";
+import { COMPONENT_CATEGORY_LABEL } from "@/lib/labels";
 import { useCreatePurchase } from "@/features/purchase/hooks";
 import { SupplierCombobox } from "@/features/purchase/supplier-combobox";
 import { formatVnd } from "@/lib/utils";
 
+// "Loại" hiển thị cho người dùng — 4 lựa chọn. Backend chỉ phân biệt
+// MACHINE/COMPONENT: Máy bộ + PC + Laptop → MACHINE, Linh kiện → COMPONENT.
+// Chỉ Máy bộ và Laptop yêu cầu model & serial; PC và Linh kiện chỉ cần miêu tả.
+type ItemKind = "MAY_BO" | "PC" | "LAPTOP" | "LINH_KIEN";
+const ITEM_KIND_OPTS: Array<{ value: ItemKind; label: string }> = [
+  { value: "MAY_BO", label: "Máy bộ" },
+  { value: "PC", label: "PC" },
+  { value: "LAPTOP", label: "Laptop" },
+  { value: "LINH_KIEN", label: "Linh kiện" },
+];
+const KIND_LABEL: Record<ItemKind, string> = {
+  MAY_BO: "Máy bộ",
+  PC: "PC",
+  LAPTOP: "Laptop",
+  LINH_KIEN: "Linh kiện",
+};
+const needsModelSerial = (k: ItemKind) => k === "MAY_BO" || k === "LAPTOP";
+
 const itemSchema = z
   .object({
-    itemType: z.nativeEnum(PurchaseItemType),
+    kind: z.enum(["MAY_BO", "PC", "LAPTOP", "LINH_KIEN"]),
     categoryCode: z.nativeEnum(ComponentCategoryCode).optional(),
-    description: z.string().min(1, "Vui lòng nhập mô tả"),
+    description: z.string().optional(),
     model: z.string().optional(),
     serial: z.string().optional(),
     quantity: z.coerce.number().int().min(1, "Số lượng tối thiểu 1"),
     unitPrice: z.coerce.number().nonnegative("Đơn giá phải >= 0"),
     notes: z.string().optional(),
   })
-  .refine(
-    (v) => v.itemType === PurchaseItemType.MACHINE || !!v.categoryCode,
-    { message: "Vui lòng chọn loại linh kiện", path: ["categoryCode"] },
-  );
+  .superRefine((v, ctx) => {
+    if (v.kind === "LINH_KIEN" && !v.categoryCode) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["categoryCode"],
+        message: "Vui lòng chọn loại linh kiện",
+      });
+    }
+    if (needsModelSerial(v.kind) && !v.model?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["model"],
+        message: "Vui lòng nhập model",
+      });
+    }
+    if (!needsModelSerial(v.kind) && !v.description?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["description"],
+        message: "Vui lòng nhập miêu tả",
+      });
+    }
+  });
 
 const schema = z.object({
   supplierId: z.string().optional(),
@@ -76,7 +110,7 @@ export default function NewPurchasePage() {
       notes: "",
       items: [
         {
-          itemType: PurchaseItemType.MACHINE,
+          kind: "MAY_BO" as ItemKind,
           description: "",
           model: "",
           serial: "",
@@ -99,21 +133,31 @@ export default function NewPurchasePage() {
         supplierId: values.supplierId,
         otherCost: values.otherCost,
         notes: values.notes,
-        items: values.items.map((it) => ({
-          itemType: it.itemType,
-          description: it.description,
-          model: it.model?.trim() ? it.model.trim() : undefined,
-          serial: it.serial?.trim() ? it.serial.trim() : undefined,
-          quantity: it.quantity,
-          unitPrice: it.unitPrice,
-          categoryCode:
-            it.itemType === PurchaseItemType.COMPONENT ? it.categoryCode : undefined,
-          notes: it.notes,
-        })),
+        items: values.items.map((it) => {
+          const isComponent = it.kind === "LINH_KIEN";
+          const withMS = needsModelSerial(it.kind);
+          // Máy bộ/Laptop bỏ trống miêu tả → tự ghép "Loại + Model" để cột
+          // Miêu tả ở danh sách máy luôn có nội dung.
+          const description = it.description?.trim()
+            ? it.description.trim()
+            : `${KIND_LABEL[it.kind]} ${it.model?.trim() ?? ""}`.trim();
+          return {
+            itemType: isComponent
+              ? PurchaseItemType.COMPONENT
+              : PurchaseItemType.MACHINE,
+            description,
+            model: withMS && it.model?.trim() ? it.model.trim() : undefined,
+            serial: withMS && it.serial?.trim() ? it.serial.trim() : undefined,
+            quantity: it.quantity,
+            unitPrice: it.unitPrice,
+            categoryCode: isComponent ? it.categoryCode : undefined,
+            notes: it.notes,
+          };
+        }),
       };
       const result = await createMutation.mutateAsync(payload);
       toast.success("Đã tạo phiếu mua (nháp)");
-      router.push(`/purchases/${result.id}`);
+      router.push(`/purchases/detail?id=${result.id}`);
     } catch (err: any) {
       toast.error(
         err?.response?.data?.error?.message ?? "Không tạo được phiếu",
@@ -186,7 +230,7 @@ export default function NewPurchasePage() {
                   size="sm"
                   onClick={() =>
                     append({
-                      itemType: PurchaseItemType.MACHINE,
+                      kind: "MAY_BO" as ItemKind,
                       description: "",
                       model: "",
                       serial: "",
@@ -201,7 +245,8 @@ export default function NewPurchasePage() {
                 </Button>
               </div>
               {fields.map((field, idx) => {
-                const itemType = form.watch(`items.${idx}.itemType`);
+                const kind = form.watch(`items.${idx}.kind`) as ItemKind;
+                const withMS = needsModelSerial(kind);
                 return (
                   <div
                     key={field.id}
@@ -209,7 +254,7 @@ export default function NewPurchasePage() {
                   >
                     <FormField
                       control={form.control}
-                      name={`items.${idx}.itemType`}
+                      name={`items.${idx}.kind`}
                       render={({ field }) => (
                         <FormItem className="sm:col-span-2">
                           <FormLabel>Loại</FormLabel>
@@ -223,9 +268,9 @@ export default function NewPurchasePage() {
                               </SelectTrigger>
                             </FormControl>
                             <SelectContent>
-                              {Object.values(PurchaseItemType).map((t) => (
-                                <SelectItem key={t} value={t}>
-                                  {PURCHASE_ITEM_TYPE_LABEL[t]}
+                              {ITEM_KIND_OPTS.map((t) => (
+                                <SelectItem key={t.value} value={t.value}>
+                                  {t.label}
                                 </SelectItem>
                               ))}
                             </SelectContent>
@@ -234,7 +279,7 @@ export default function NewPurchasePage() {
                         </FormItem>
                       )}
                     />
-                    {itemType === PurchaseItemType.COMPONENT && (
+                    {kind === "LINH_KIEN" && (
                       <FormField
                         control={form.control}
                         name={`items.${idx}.categoryCode`}
@@ -271,14 +316,25 @@ export default function NewPurchasePage() {
                       render={({ field }) => (
                         <FormItem
                           className={
-                            itemType === PurchaseItemType.COMPONENT
+                            kind === "LINH_KIEN"
                               ? "sm:col-span-3"
                               : "sm:col-span-5"
                           }
                         >
-                          <FormLabel>Mô tả</FormLabel>
+                          <FormLabel>
+                            Miêu tả{withMS ? " (tuỳ chọn)" : ""}
+                          </FormLabel>
                           <FormControl>
-                            <Input placeholder="VD: Dell Optiplex 7050" {...field} />
+                            <Input
+                              placeholder={
+                                withMS
+                                  ? "Bỏ trống sẽ tự ghép: Loại + Model"
+                                  : kind === "PC"
+                                    ? "VD: PC văn phòng i5 gen 8, 16GB RAM"
+                                    : "VD: RAM DDR4 8GB Kingston"
+                              }
+                              {...field}
+                            />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -320,39 +376,44 @@ export default function NewPurchasePage() {
                         )}
                       </div>
                     </FormItem>
-                    <FormField
-                      control={form.control}
-                      name={`items.${idx}.model`}
-                      render={({ field }) => (
-                        <FormItem className="sm:col-span-6">
-                          <FormLabel>Model</FormLabel>
-                          <FormControl>
-                            <Input placeholder="VD: 7050 MFF" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name={`items.${idx}.serial`}
-                      render={({ field }) => (
-                        <FormItem className="sm:col-span-6">
-                          <FormLabel>Serial</FormLabel>
-                          <FormControl>
-                            <Input
-                              placeholder={
-                                Number(form.watch(`items.${idx}.quantity`)) > 1
-                                  ? "Nhập trên từng máy sau khi tách"
-                                  : "VD: SN123456"
-                              }
-                              {...field}
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
+                    {/* Model + Serial: chỉ Máy bộ và Laptop mới cần khai. */}
+                    {withMS && (
+                      <>
+                        <FormField
+                          control={form.control}
+                          name={`items.${idx}.model`}
+                          render={({ field }) => (
+                            <FormItem className="sm:col-span-6">
+                              <FormLabel>Model</FormLabel>
+                              <FormControl>
+                                <Input placeholder="VD: Dell Optiplex 7050 MFF" {...field} />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name={`items.${idx}.serial`}
+                          render={({ field }) => (
+                            <FormItem className="sm:col-span-6">
+                              <FormLabel>Serial</FormLabel>
+                              <FormControl>
+                                <Input
+                                  placeholder={
+                                    Number(form.watch(`items.${idx}.quantity`)) > 1
+                                      ? "Nhập trên từng máy sau khi tách"
+                                      : "VD: SN123456"
+                                  }
+                                  {...field}
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </>
+                    )}
                     <FormField
                       control={form.control}
                       name={`items.${idx}.notes`}

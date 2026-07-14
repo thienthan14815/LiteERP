@@ -14,6 +14,9 @@ export class RequestContextInterceptor implements NestInterceptor {
       userId: user?.id,
       ip: (req.ip as string | undefined) ?? (req.headers["x-forwarded-for"] as string | undefined),
       userAgent: req.headers["user-agent"] as string | undefined,
+      // Set by the request-id middleware in main.ts (present even for errors
+      // thrown before this interceptor runs).
+      requestId: req.requestId as string | undefined,
     };
     return new Observable((subscriber) => {
       this.ctx.run(store, () => {

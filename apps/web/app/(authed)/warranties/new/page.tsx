@@ -64,7 +64,7 @@ export default function NewWarrantyPage() {
       {
         onSuccess: (w) => {
           toast.success(`Đã tạo đơn ${w.code}`);
-          router.push(`/warranties/${w.id}`);
+          router.push(`/warranties/detail?id=${w.id}`);
         },
         onError: (err: any) =>
           toast.error(err?.response?.data?.error?.message ?? "Tạo đơn thất bại"),

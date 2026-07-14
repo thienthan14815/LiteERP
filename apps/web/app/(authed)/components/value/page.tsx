@@ -21,7 +21,10 @@ export default function InventoryValuePage() {
 
   return (
     <div>
-      <PageHeader title="Giá trị kho" description="Tổng giá vốn tồn kho" />
+      <PageHeader
+        title="Giá trị kho"
+        description="Toàn bộ vốn đang nằm trong hàng chưa bán: máy cũ + PC thành phẩm + linh kiện"
+      />
       {isLoading ? (
         <Skeleton className="h-40" />
       ) : isError || !data ? (
@@ -30,10 +33,44 @@ export default function InventoryValuePage() {
         <div className="space-y-4">
           <Card>
             <CardHeader>
-              <CardDescription>Tổng giá trị</CardDescription>
+              <CardDescription>Tổng giá trị tồn kho (chưa bán)</CardDescription>
               <CardTitle className="text-3xl">{formatVnd(data.totalValue)}</CardTitle>
             </CardHeader>
           </Card>
+          {data.breakdown && (
+            <div className="grid gap-4 sm:grid-cols-3">
+              <Card>
+                <CardHeader>
+                  <CardDescription>
+                    Máy cũ chờ xử lý ({formatNumber(data.breakdown.machines.count)})
+                  </CardDescription>
+                  <CardTitle className="text-2xl">
+                    {formatVnd(data.breakdown.machines.value)}
+                  </CardTitle>
+                </CardHeader>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <CardDescription>
+                    PC thành phẩm trên kệ ({formatNumber(data.breakdown.finishedPcs.count)})
+                  </CardDescription>
+                  <CardTitle className="text-2xl">
+                    {formatVnd(data.breakdown.finishedPcs.value)}
+                  </CardTitle>
+                </CardHeader>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <CardDescription>
+                    Linh kiện trong kho ({formatNumber(data.breakdown.components.count)})
+                  </CardDescription>
+                  <CardTitle className="text-2xl">
+                    {formatVnd(data.breakdown.components.value)}
+                  </CardTitle>
+                </CardHeader>
+              </Card>
+            </div>
+          )}
           <Card>
             <CardHeader>
               <CardTitle>Theo loại linh kiện</CardTitle>

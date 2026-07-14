@@ -1,109 +1,113 @@
 import { Injectable } from "@nestjs/common";
-import { ComponentStatus, Prisma } from "@prisma/client";
-import { PrismaService } from "../../database/prisma.service";
+import { and, desc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
+import { DbService } from "../../database/db.service";
+import {
+  componentCategories,
+  components,
+  finishedPcs,
+  machines,
+  stockTransactions,
+} from "../../database/schema";
 import { StockTransactionService } from "./stock-transaction.service";
 import { AuditLogService } from "../audit-logs/audit-logs.service";
 import { buildPagination, paginate } from "../../common/utils/pagination.util";
+import { computeStockValue } from "../../common/utils/stock-value.util";
 import { QueryStockDto } from "./dto/query-stock.dto";
 import { AdjustmentDto } from "./dto/adjustment.dto";
 
 @Injectable()
 export class InventoryService {
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly dbs: DbService,
     private readonly stock: StockTransactionService,
     private readonly audit: AuditLogService,
   ) {}
 
   async listTransactions(q: QueryStockDto) {
-    const where: Prisma.StockTransactionWhereInput = {};
-    if (q.type) where.type = q.type;
-    if (q.componentId) where.componentId = q.componentId;
-    if (q.refType) where.refType = q.refType;
-    if (q.refId) where.refId = q.refId;
-    if (q.fromDate || q.toDate) {
-      where.createdAt = {};
-      if (q.fromDate) (where.createdAt as Prisma.DateTimeFilter).gte = new Date(q.fromDate);
-      if (q.toDate) (where.createdAt as Prisma.DateTimeFilter).lte = new Date(q.toDate);
-    }
+    const db = this.dbs.db;
+    const conds: SQL[] = [];
+    if (q.type) conds.push(eq(stockTransactions.type, q.type));
+    if (q.componentId) conds.push(eq(stockTransactions.componentId, q.componentId));
+    if (q.refType) conds.push(eq(stockTransactions.refType, q.refType));
+    if (q.refId) conds.push(eq(stockTransactions.refId, q.refId));
+    if (q.fromDate) conds.push(gte(stockTransactions.createdAt, new Date(q.fromDate)));
+    if (q.toDate) conds.push(lte(stockTransactions.createdAt, new Date(q.toDate)));
+    const where = conds.length ? and(...conds) : undefined;
     const { take, skip } = buildPagination(q.page, q.pageSize);
-    const [items, total] = await this.prisma.$transaction([
-      this.prisma.stockTransaction.findMany({
-        where,
-        include: { component: { select: { code: true, categoryId: true } } },
-        orderBy: { createdAt: "desc" },
-        take,
-        skip,
-      }),
-      this.prisma.stockTransaction.count({ where }),
-    ]);
+    const items = await db.query.stockTransactions.findMany({
+      where,
+      with: { component: { columns: { code: true, categoryId: true } } },
+      orderBy: [desc(stockTransactions.createdAt)],
+      limit: take,
+      offset: skip,
+    });
+    const totalRows = await db
+      .select({ count: sql<number>`count(*)`.as("count") })
+      .from(stockTransactions)
+      .where(where);
+    const total = Number(totalRows[0]?.count ?? 0);
     return paginate(items, total, q.page ?? 1, q.pageSize ?? 20);
   }
 
   async summary() {
-    const byStatusRaw = await this.prisma.component.groupBy({
-      by: ["status"],
-      _count: { _all: true },
-    });
-    const byCategoryRaw = await this.prisma.component.groupBy({
-      by: ["categoryId"],
-      _count: { _all: true },
-    });
+    const db = this.dbs.db;
+    const byStatusRaw = await db
+      .select({ status: components.status, count: sql<number>`count(*)`.as("count") })
+      .from(components)
+      .groupBy(components.status);
+    const byCategoryRaw = await db
+      .select({ categoryId: components.categoryId, count: sql<number>`count(*)`.as("count") })
+      .from(components)
+      .groupBy(components.categoryId);
     // Map categoryId -> categoryCode để client hiển thị nhãn đúng.
-    const categories = await this.prisma.componentCategory.findMany({
-      select: { id: true, code: true },
-    });
+    const categories = await db
+      .select({ id: componentCategories.id, code: componentCategories.code })
+      .from(componentCategories);
     const idToCode = new Map(categories.map((c) => [c.id, c.code]));
-    const machineByStatus = await this.prisma.machine.groupBy({
-      by: ["status"],
-      _count: { _all: true },
-    });
-    const finishedByStatus = await this.prisma.finishedPc.groupBy({
-      by: ["status"],
-      _count: { _all: true },
-    });
+    const machineByStatus = await db
+      .select({ status: machines.status, count: sql<number>`count(*)`.as("count") })
+      .from(machines)
+      .groupBy(machines.status);
+    const finishedByStatus = await db
+      .select({ status: finishedPcs.status, count: sql<number>`count(*)`.as("count") })
+      .from(finishedPcs)
+      .groupBy(finishedPcs.status);
     return {
       // Shape phẳng khớp UI /components/summary (mảng object).
-      byStatus: byStatusRaw.map((g) => ({ status: g.status, count: g._count._all })),
+      byStatus: byStatusRaw.map((g) => ({ status: g.status, count: Number(g.count) })),
       byCategory: byCategoryRaw
-        .map((g) => ({ category: idToCode.get(g.categoryId) ?? "OTHER", count: g._count._all }))
+        .map((g) => ({ category: idToCode.get(g.categoryId) ?? "OTHER", count: Number(g.count) }))
         .filter((g) => g.count > 0),
       // Extra data cho các consumer khác (dashboard, mobile).
-      machines: Object.fromEntries(machineByStatus.map((g) => [g.status, g._count._all])),
-      finishedPcs: Object.fromEntries(finishedByStatus.map((g) => [g.status, g._count._all])),
+      machines: Object.fromEntries(machineByStatus.map((g) => [g.status, Number(g.count)])),
+      finishedPcs: Object.fromEntries(finishedByStatus.map((g) => [g.status, Number(g.count)])),
     };
   }
 
   async value() {
-    const rows = await this.prisma.component.findMany({
-      where: { status: ComponentStatus.IN_STOCK },
-      select: { categoryId: true, costPrice: true, category: { select: { code: true, name: true } } },
-    });
-    const byCategory = new Map<string, { category: string; name: string; value: number; count: number }>();
-    let total = 0;
-    for (const r of rows) {
-      const cost = Number(r.costPrice);
-      total += cost;
-      const entry = byCategory.get(r.categoryId) ?? {
-        category: r.category.code,
-        name: r.category.name,
-        value: 0,
-        count: 0,
-      };
-      entry.value += cost;
-      entry.count += 1;
-      byCategory.set(r.categoryId, entry);
-    }
+    // Giá trị tồn kho = TOÀN BỘ vốn chưa bán: linh kiện + máy cũ + PC thành
+    // phẩm (định nghĩa & chống đếm trùng: xem stock-value.util).
+    const sv = await computeStockValue(this.dbs.db);
     return {
-      totalValue: total,
-      totalCount: rows.length,
-      byCategory: Array.from(byCategory.values()),
+      totalValue: sv.totalValue,
+      totalCount: sv.totalCount,
+      byCategory: sv.byCategory,
+      breakdown: {
+        components: sv.components,
+        machines: sv.machines,
+        finishedPcs: sv.finishedPcs,
+      },
     };
   }
 
   async adjust(dto: AdjustmentDto) {
-    return this.prisma.$transaction(async (tx) => {
-      const before = await tx.component.findUnique({ where: { id: dto.componentId } });
+    return this.dbs.transaction(async (db) => {
+      const beforeRows = await db
+        .select()
+        .from(components)
+        .where(eq(components.id, dto.componentId))
+        .limit(1);
+      const before = beforeRows[0] ?? null;
       const txn = await this.stock.create(
         {
           componentId: dto.componentId,
@@ -113,10 +117,12 @@ export class InventoryService {
           newComponentStatus: dto.newStatus,
           refType: "ADJUSTMENT",
         },
-        tx,
+        db,
       );
       const after = dto.newStatus
-        ? await tx.component.findUnique({ where: { id: dto.componentId } })
+        ? ((
+            await db.select().from(components).where(eq(components.id, dto.componentId)).limit(1)
+          )[0] ?? null)
         : before;
       await this.audit.record(
         {
@@ -126,7 +132,7 @@ export class InventoryService {
           before,
           after,
         },
-        tx,
+        db,
       );
       return txn;
     });

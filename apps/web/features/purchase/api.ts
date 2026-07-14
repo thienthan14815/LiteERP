@@ -141,6 +141,10 @@ export async function cancelPurchase(id: string): Promise<PurchaseDetail> {
   return unwrap<PurchaseDetail>(data);
 }
 
+export async function deletePurchase(id: string): Promise<void> {
+  await apiClient.delete(`/purchases/${id}`);
+}
+
 export async function updatePurchaseItem(
   orderId: string,
   itemId: string,

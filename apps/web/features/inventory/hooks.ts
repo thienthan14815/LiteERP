@@ -2,7 +2,8 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  allocateMachineCost,
+  deleteComponent,
+  deleteMachine,
   disassembleMachine,
   getComponent,
   getInventorySummary,
@@ -14,12 +15,13 @@ import {
   listStockTransactions,
   markMachineReadyForSale,
   scrapComponent,
+  updateComponent,
   updateMachine,
-  type AllocateCostDto,
   type ComponentListQuery,
   type InspectMachineDto,
   type MachineListQuery,
   type StockTxnListQuery,
+  type UpdateComponentDto,
   type UpdateMachineDto,
 } from "./api";
 
@@ -68,16 +70,6 @@ export function useInspectMachine(id: string) {
   });
 }
 
-export function useAllocateMachineCost(id: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (payload: AllocateCostDto) => allocateMachineCost(id, payload),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: machineKeys.detail(id) });
-    },
-  });
-}
-
 export function useDisassembleMachine(id: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -97,6 +89,8 @@ export function useMarkMachineReady(id: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: machineKeys.all });
       qc.invalidateQueries({ queryKey: machineKeys.detail(id) });
+      // Máy lên kệ = một bản ghi mới trong mục PC thành phẩm.
+      qc.invalidateQueries({ queryKey: ["finished-pcs"] });
     },
   });
 }
@@ -108,6 +102,16 @@ export function useUpdateMachine(id: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: machineKeys.all });
       qc.invalidateQueries({ queryKey: machineKeys.detail(id) });
+    },
+  });
+}
+
+export function useDeleteMachine() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => deleteMachine(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: machineKeys.all });
     },
   });
 }
@@ -134,6 +138,27 @@ export function useScrapComponent(id: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: componentKeys.all });
       qc.invalidateQueries({ queryKey: componentKeys.detail(id) });
+    },
+  });
+}
+
+export function useUpdateComponent(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: UpdateComponentDto) => updateComponent(id, payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: componentKeys.all });
+      qc.invalidateQueries({ queryKey: componentKeys.detail(id) });
+    },
+  });
+}
+
+export function useDeleteComponent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => deleteComponent(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: componentKeys.all });
     },
   });
 }

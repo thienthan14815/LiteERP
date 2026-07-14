@@ -90,6 +90,22 @@ export enum ComponentCondition {
   LIQUIDATION = "LIQUIDATION",
 }
 
+export enum SupplierCategory {
+  WHOLESALE = "WHOLESALE",
+  RETAIL = "RETAIL",
+}
+
+export enum MasterOptionType {
+  SELLER = "SELLER",
+  SALES_PLATFORM = "SALES_PLATFORM",
+}
+
+export enum BackupKind {
+  DAILY = "DAILY",
+  WEEKLY = "WEEKLY",
+  MONTHLY = "MONTHLY",
+}
+
 export enum ComponentCategoryCode {
   CPU = "CPU",
   MB = "MB",

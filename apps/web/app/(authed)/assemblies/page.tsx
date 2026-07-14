@@ -170,7 +170,7 @@ export default function AssembliesListPage() {
                     </TableCell>
                     <TableCell>
                       <Button asChild variant="ghost" size="sm">
-                        <Link href={`/assemblies/${row.id}`}>Xem</Link>
+                        <Link href={`/assemblies/detail?id=${row.id}`}>Xem</Link>
                       </Button>
                     </TableCell>
                   </TableRow>

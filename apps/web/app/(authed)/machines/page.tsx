@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { Monitor } from "lucide-react";
 import { MachineStatus } from "@app/shared";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -127,9 +128,9 @@ export default function MachinesListPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-14">Hình ảnh</TableHead>
                   <TableHead>Mã</TableHead>
-                  <TableHead>Serial</TableHead>
-                  <TableHead>Model</TableHead>
+                  <TableHead>Miêu tả</TableHead>
                   <TableHead>Ngày nhập</TableHead>
                   <TableHead className="text-right">Giá mua</TableHead>
                   <TableHead>Trạng thái</TableHead>
@@ -139,9 +140,27 @@ export default function MachinesListPage() {
               <TableBody>
                 {data.data.map((m) => (
                   <TableRow key={m.id}>
+                    <TableCell>
+                      {m.thumbnailUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={m.thumbnailUrl}
+                          alt={m.code}
+                          loading="lazy"
+                          className="h-10 w-10 rounded-md border object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-10 w-10 items-center justify-center rounded-md border bg-slate-50 text-slate-300">
+                          <Monitor className="h-5 w-5" />
+                        </div>
+                      )}
+                    </TableCell>
                     <TableCell className="font-medium">{m.code}</TableCell>
-                    <TableCell>{m.serial ?? "-"}</TableCell>
-                    <TableCell>{m.model ?? "-"}</TableCell>
+                    <TableCell className="max-w-[280px]">
+                      <span className="line-clamp-2">
+                        {m.description ?? m.model ?? "-"}
+                      </span>
+                    </TableCell>
                     <TableCell>{formatDate(m.createdAt)}</TableCell>
                     <TableCell className="text-right">
                       {formatVnd(m.purchasePrice)}
@@ -154,7 +173,7 @@ export default function MachinesListPage() {
                     </TableCell>
                     <TableCell>
                       <Button asChild variant="ghost" size="sm">
-                        <Link href={`/machines/${m.id}`}>Xem</Link>
+                        <Link href={`/machines/detail?id=${m.id}`}>Xem</Link>
                       </Button>
                     </TableCell>
                   </TableRow>
